@@ -1,0 +1,43 @@
+{
+  "name": "ipatool-gui",
+  "productName": "IPATool GUI",
+  "version": "1.0.0",
+  "description": "A fast cross-platform desktop GUI for ipatool - search the App Store, browse version history and download .ipa / .pkg packages.",
+  "author": "ipatool-gui contributors",
+  "license": "MIT",
+  "private": true,
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build-main.mjs && vite build",
+    "build:main": "node scripts/build-main.mjs",
+    "build:renderer": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "test:ci": "vitest run --reporter=dot"
+  },
+  "devDependencies": {
+    "@tanstack/react-virtual": "3.14.13",
+    "@types/node": "22.19.1",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.1.1",
+    "clsx": "2.1.1",
+    "electron": "39.2.7",
+    "electron-builder": "26.4.0",
+    "esbuild": "0.27.0",
+    "react": "19.2.1",
+    "react-dom": "19.2.1",
+    "tailwindcss": "4.1.17",
+    "@tailwindcss/vite": "4.1.17",
+    "typescript": "5.9.3",
+    "vite": "7.2.4",
+    "vitest": "3.2.4",
+    "zustand": "5.0.8"
+  }
+}

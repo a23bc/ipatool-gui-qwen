@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# The release job uploads installers; the publish job attaches them to a GitHub
+# release only after every platform succeeded, so a release never ships half-built.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            ext: 'exe'
+          - os: macos-14
+            platform: mac
+            ext: 'dmg'
+          - os: ubuntu-22.04
+            platform: linux
+            ext: 'AppImage'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # electron-builder needs these only on Linux (AppImage/deb packaging tools
+      # shell out to them). macOS/Windows runners need nothing extra.
+      - name: Install Linux packaging tools
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fakeroot dpkg rpm libarchive-tools
+
+      - name: Build
+        run: npx electron-builder --${{ matrix.platform }} --publish never
+        env:
+          # Lets "check for updates" point at this repository in the shipped app.
+          APP_REPO: ${{ github.repository }}
+          APP_VERSION: ${{ github.ref_name }}
+          # Builds are unsigned by design; make that explicit so a missing
+          # certificate never silently changes the output.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: List artifacts
+        run: ls -lh release/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb
+            release/*.yml
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "IPATool GUI ${GITHUB_REF_NAME}" \
+            --draft \
+            --notes "Installers for Windows (NSIS + portable), macOS (dmg, unsigned) and Linux (AppImage, deb).
+
+          Builds are **unsigned**: on macOS right-click → Open the first time; on Windows accept the SmartScreen prompt.
+
+          The app itself downloads and verifies [ipatool](https://github.com/majd/ipatool) on first launch - it is not bundled." \
+            artifacts/*

@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+# A new push supersedes an in-flight run of the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The Electron *binary* is irrelevant for verification; downloading it only
+      # burns CI minutes and can fail on flaky mirrors.
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - name: Typecheck (main + preload + scripts)
+        run: npx tsc --noEmit -p tsconfig.node.json
+
+      - name: Typecheck (renderer + shared)
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Unit tests
+        run: npx vitest run
+
+      - name: Production build
+        run: npm run build
+        env:
+          APP_REPO: ${{ github.repository }}
+
+      - name: Report bundle sizes
+        run: |
+          echo "## Bundle sizes" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          du -h dist/main/index.js dist/preload/index.js >> "$GITHUB_STEP_SUMMARY"
+          ls -lh dist/renderer/assets | awk '{print $5, $9}' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,81 @@
+# electron-builder configuration.
+#
+# The app ships *no* node_modules: main and preload are fully bundled by esbuild,
+# so `files` only needs the bundle plus package.json. That is what keeps the
+# installer near the size of the code itself rather than a Node_modules tree.
+appId: dev.ipatoolgui.desktop
+productName: IPATool GUI
+copyright: Copyright © 2026 ipatool-gui contributors
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - package.json
+  - "!**/*.map"
+
+asar: true
+asarUnpack: []
+compression: maximum
+
+# No native modules in this project, so never attempt a rebuild.
+npmRebuild: false
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+
+# Builds are unsigned by design (no signing credentials in CI). Gatekeeper and
+# SmartScreen warnings are expected; the README explains how to open them.
+win:
+  icon: build/icon.png
+  artifactName: ${name}-${version}-win-${arch}.${ext}
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: IPATool GUI
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.utilities
+  artifactName: ${name}-${version}-mac-${arch}.${ext}
+  # Unsigned distribution: skip notarisation/hardening so the build works from
+  # any fork without Apple Developer credentials.
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+
+linux:
+  icon: build/icon.png
+  category: Utility
+  synopsis: Desktop front-end for ipatool
+  maintainer: ipatool-gui contributors <noreply@example.com>
+  artifactName: ${name}-${version}-linux-${arch}.${ext}
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]
+  desktop:
+    entry:
+      Name: IPATool GUI
+      Comment: Search the App Store and download .ipa packages via ipatool
+      Terminal: false
+
+publish:
+  provider: github
+  releaseType: draft
