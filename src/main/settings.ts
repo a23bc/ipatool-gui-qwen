@@ -44,9 +44,7 @@ export function defaultSettings(): Settings {
     purchasesPageSize: 50,
     passphraseMode: 'auto',
     keychainPassphrase: '',
-    profiles: [],
-    activeProfileId: '',
-    profileCounter: 1,
+    stateDir: '',
     verbose: false,
     theme: 'system',
     locale: 'system',
@@ -98,63 +96,9 @@ export function normalizeSettings(input: unknown): Settings {
   const modes = ['auto', 'manual', 'none']
   if (!modes.includes(out.passphraseMode)) out.passphraseMode = 'auto'
 
-  // Profiles are structured data, so they are coerced field-by-field rather than
-  // through the scalar loop above.
-  if (Array.isArray((raw as { profiles?: unknown }).profiles)) {
-    out.profiles = ((raw as { profiles: unknown[] }).profiles)
-      .map((entry) => coerceProfile(entry))
-      .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-  }
-  const activeId = (raw as { activeProfileId?: unknown }).activeProfileId
-  if (typeof activeId === 'string') out.activeProfileId = activeId
-  const counter = (raw as { profileCounter?: unknown }).profileCounter
-  if (typeof counter === 'number' && Number.isFinite(counter)) out.profileCounter = counter
-
-  // Migration: pre-profile builds stored a single global XDG_STATE_HOME. Carry
-  // it into the default profile so an existing session is not orphaned.
-  if (out.profiles.length === 0) {
-    const legacyDir = (raw as { stateDir?: unknown }).stateDir
-    out.profiles = [
-      {
-        id: 'p-default',
-        name: out.lastEmail || 'Default',
-        remark: '',
-        email: out.lastEmail,
-        stateDir: typeof legacyDir === 'string' ? legacyDir : '',
-        createdAt: Date.now(),
-        lastUsedAt: Date.now()
-      }
-    ]
-  }
-  // Keep the placeholder counter ahead of any migrated profiles so generated
-  // names can never collide with an existing one.
-  if (out.profileCounter <= out.profiles.length) out.profileCounter = out.profiles.length + 1
-  const firstProfile = out.profiles[0]
-  if (firstProfile && !out.profiles.some((profile) => profile.id === out.activeProfileId)) {
-    out.activeProfileId = firstProfile.id
-  }
-
   if (out.artworkCountry.trim() === '') out.artworkCountry = 'us'
 
   return out
-}
-
-import type { Profile } from '../shared/types'
-
-/** Validates one persisted profile entry; null when unusable. */
-function coerceProfile(entry: unknown): Profile | null {
-  if (!entry || typeof entry !== 'object') return null
-  const obj = entry as Record<string, unknown>
-  if (typeof obj.id !== 'string' || obj.id === '') return null
-  return {
-    id: obj.id,
-    name: typeof obj.name === 'string' && obj.name !== '' ? obj.name : 'Account',
-    remark: typeof obj.remark === 'string' ? obj.remark : '',
-    email: typeof obj.email === 'string' ? obj.email : '',
-    stateDir: typeof obj.stateDir === 'string' ? obj.stateDir : '',
-    createdAt: typeof obj.createdAt === 'number' ? obj.createdAt : Date.now(),
-    lastUsedAt: typeof obj.lastUsedAt === 'number' ? obj.lastUsedAt : Date.now()
-  }
 }
 
 export class SettingsStore extends EventEmitter {

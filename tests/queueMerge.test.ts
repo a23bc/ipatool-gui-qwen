@@ -5,7 +5,6 @@ import type { QueueItem } from '@shared/types'
 function makeItem(overrides: Partial<QueueItem> = {}): QueueItem {
   return {
     id: 'd1',
-    profileId: 'p-default',
     appId: 686449807,
     bundleID: 'com.example.app',
     name: 'Example',

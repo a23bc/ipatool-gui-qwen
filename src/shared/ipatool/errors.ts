@@ -28,6 +28,8 @@ export type IpatoolErrorCode =
   | 'disk'
   | 'engine-missing'
   | 'session-mismatch'
+  | 'profile-required'
+  | 'profile-not-found'
   | 'canceled'
   | 'unknown'
 
@@ -233,6 +235,16 @@ const RULES: Rule[] = [
   {
     code: 'session-mismatch',
     patterns: [/session mismatch for/i],
+    actionable: true
+  },
+  {
+    code: 'profile-required',
+    patterns: [/no profile specified/i],
+    actionable: true
+  },
+  {
+    code: 'profile-not-found',
+    patterns: [/no longer exists/i],
     actionable: true
   },
   {

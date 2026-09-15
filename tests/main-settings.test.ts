@@ -43,16 +43,14 @@ beforeEach(() => {
 })
 
 describe('defaultSettings', () => {
-  it('has sane ranges; the default profile is created by the profiles layer', () => {
+  it('has sane ranges and an empty state dir by default', () => {
     const settings = normalizeSettings(null)
     expect(settings.concurrency).toBe(2)
     expect(settings.searchLimit).toBe(25)
     expect(settings.passphraseMode).toBe('auto')
     // normalizeSettings() only synthesises a p-default profile when migrating
-    // a persisted object; a fresh default starts empty and profiles.ensureDefault()
     // materialises the default account on first use.
-    expect(settings.profiles).toEqual([])
-    expect(settings.activeProfileId).toBe('')
+    expect(settings.stateDir).toBe('')
     expect(defaultSettings().downloadDir).toContain('ipatool')
   })
 })
@@ -62,7 +60,7 @@ describe('normalizeSettings', () => {
     for (const bad of [null, undefined, 42, 'settings']) {
       const out = normalizeSettings(bad)
       expect(out.concurrency).toBe(2)
-      expect(out.profiles).toEqual([])
+      expect(out.stateDir).toBe('')
     }
     // An array is an object but carries no settings fields; same outcome.
     expect(normalizeSettings([]).concurrency).toBe(2)
@@ -129,70 +127,10 @@ describe('normalizeSettings', () => {
     expect(ok.passphraseMode).toBe('none')
   })
 
-  it('coerces profiles field-by-field and drops unusable entries', () => {
-    const out = normalizeSettings({
-      profiles: [
-        null,
-        42,
-        'nope',
-        { name: 'missing id' },
-        { id: '' },
-        {
-          id: 'p1',
-          name: 99, // wrong type -> placeholder
-          remark: null, // wrong type -> ''
-          email: 'me@example.com',
-          stateDir: '~/state',
-          createdAt: 'yesterday', // wrong type -> Date.now()
-          lastUsedAt: 5
-        }
-      ]
-    })
-    expect(out.profiles).toHaveLength(1)
-    const p = out.profiles[0]
-    expect(p?.id).toBe('p1')
-    expect(p?.name).toBe('Account')
-    expect(p?.remark).toBe('')
-    expect(p?.email).toBe('me@example.com')
-    expect(p?.stateDir).toBe('~/state')
-    expect(typeof p?.createdAt).toBe('number')
-    expect(p?.lastUsedAt).toBe(5)
-  })
 
-  it('migrates a legacy global stateDir into the default profile', () => {
-    const out = normalizeSettings({
-      stateDir: '/home/user/.ipatool-legacy',
-      lastEmail: 'old@example.com'
-    })
-    expect(out.profiles).toHaveLength(1)
-    expect(out.profiles[0]?.id).toBe('p-default')
-    expect(out.profiles[0]?.stateDir).toBe('/home/user/.ipatool-legacy')
-    expect(out.profiles[0]?.name).toBe('old@example.com')
-  })
 
-  it('keeps the profile counter ahead of the profile count', () => {
-    const out = normalizeSettings({
-      profileCounter: 1,
-      profiles: [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
-    })
-    expect(out.profileCounter).toBe(4)
-  })
 
-  it('re-points a dangling activeProfileId at the first profile', () => {
-    const out = normalizeSettings({
-      activeProfileId: 'deleted-profile',
-      profiles: [{ id: 'a' }, { id: 'b' }]
-    })
-    expect(out.activeProfileId).toBe('a')
-  })
 
-  it('keeps a valid activeProfileId', () => {
-    const out = normalizeSettings({
-      activeProfileId: 'b',
-      profiles: [{ id: 'a' }, { id: 'b' }]
-    })
-    expect(out.activeProfileId).toBe('b')
-  })
 
   it('defaults an empty artworkCountry to "us"', () => {
     expect(normalizeSettings({ artworkCountry: '   ' }).artworkCountry).toBe('us')

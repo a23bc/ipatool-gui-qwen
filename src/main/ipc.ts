@@ -11,7 +11,6 @@ import { BrowserWindow, clipboard, dialog, ipcMain, shell, nativeTheme, app, Not
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type {
-  AccountInfo,
   AppInfoPayload,
   DownloadRequest,
   EngineStatus,
@@ -21,7 +20,7 @@ import type {
   RawRunRequest,
   Settings
 } from '../shared/types'
-import type { ProfileView, QueueAction } from '../shared/ipc'
+import type { QueueAction } from '../shared/ipc'
 import { IPC } from '../shared/ipc'
 import { quoteCommand } from '../shared/format'
 import { redactArgs } from '../shared/redact'
@@ -32,9 +31,6 @@ import { ApiError, ipatoolApi } from './api'
 import { artworkCache } from './artwork'
 import { downloadQueue } from './queue'
 import { engineManager, EngineError } from './engine'
-import * as profiles from './profiles'
-import { migrateLegacyState } from './profiles'
-import * as credentials from './credentials'
 import { settingsStore } from './settings'
 import { taskRegistry } from './tasks'
 import { APP_PRODUCT, APP_VERSION, checkAppUpdate } from './update'
@@ -174,122 +170,20 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.AppCheckUpdate, () => checkAppUpdate())
 
   /* ---------------------------------------------------------------- *
-   * profiles (multi-account)
-   * ---------------------------------------------------------------- */
-
-  ipcMain.handle(IPC.ProfilesList, () => profileViews())
-
-  ipcMain.handle(IPC.ProfilesAdd, async (_e, name: string) => {
-    // A brand-new profile has no session; clear the cached account so the login
-    // dialog never shows the previous profile's identity.
-    await migrateLegacyState().catch(() => null)
-    profiles.add(String(name ?? ''))
-    setAccount(null)
-    return profileViews()
-  })
-
-  ipcMain.handle(IPC.ProfilesSetPassword, async (_e, id: string, password: string, email: string) => {
-    await credentials.set(String(id), String(password ?? ''), String(email ?? ''))
-    return profileViews()
-  })
-
-  ipcMain.handle(IPC.ProfilesForgetPassword, async (_e, id: string) => {
-    await credentials.clear(String(id))
-    return profileViews()
-  })
-
-  ipcMain.handle(IPC.ProfilesRename, async (_e, id: string, name: string) => {
-    profiles.rename(String(id), String(name ?? ''))
-    return profileViews()
-  })
-
-  ipcMain.handle(IPC.ProfilesSetStateDir, (_e, id: string, dir: string) => {
-    const profile = profiles.get(String(id))
-    if (!profile) return profileViews()
-    const next = profiles.list().map((p) => (p.id === id ? { ...p, stateDir: String(dir ?? '') } : p))
-    // Go through update() so the new list passes normalizeSettings/coerceProfile
-    // like every other write; override() + persistNow() bypassed validation.
-    settingsStore.update({ profiles: next })
-    return profileViews()
-  })
-
-  ipcMain.handle(IPC.ProfilesRemove, async (_e, id: string) => {
-    const result = await profiles.remove(String(id))
-    await credentials.clear(String(id)).catch(() => {})
-    cachedAccount = null
-    await refreshActiveAccount()
-    return { profiles: await profileViews(), removedDir: result.removedDir }
-  })
-
-  ipcMain.handle(IPC.ProfilesSetActive, async (_e, id: string) => {
-    await migrateLegacyState().catch(() => null)
-    const target = profiles.get(String(id))
-    profiles.setActive(String(id))
-    // Immediately drop the previous identity so no UI can show it for the new
-    // profile.
-    setAccount(null)
-    if (!target) return { profiles: await profileViews(), account: null, needs2fa: false }
-
-    // On macOS / keyring-backed Linux the OS keychain holds a single machine-wide
-    // session, so "switching" must re-authenticate the target account. With a
-    // stored password this is silent; otherwise the user signs in manually.
-    const credential = await credentials.get(target.id)
-    // Only auto-login when the stored pair actually belongs to this profile.
-    // A password captured for another Apple ID must never be replayed here:
-    // doing so would write that account's session into this profile's
-    // directory, which is exactly the "switching back overwrote it" report.
-    const storedMatches =
-      credential !== null &&
-      (!target.email || !credential.email || credential.email === target.email.trim().toLowerCase())
-    if (credential && storedMatches) {
-      const result = await ipatoolApi.login(
-        credential.email || target.email,
-        credential.password,
-        undefined,
-        target.id
-      )
-      if (result.status === 'ok' && result.account) {
-        setAccount(result.account)
-        return { profiles: await profileViews(), account: result.account, needs2fa: false }
-      }
-      if (result.status === 'needs-2fa') {
-        return { profiles: await profileViews(), account: null, needs2fa: true }
-      }
-    }
-
-    const account = await refreshActiveAccount()
-    return { profiles: await profileViews(), account, needs2fa: false }
-  })
-
-  ipcMain.handle(IPC.ProfilesRefreshInfo, async (_e, id: string) => {
-    const account = await ipatoolApi.accountInfoOrNull(String(id)).catch(() => null)
-    return { profiles: await profileViews(), account }
-  })
-
-  /* ---------------------------------------------------------------- *
    * auth
    * ---------------------------------------------------------------- */
 
-  ipcMain.handle(
-    IPC.AuthLogin,
-    async (_e, email: string, password: string, authCode?: string, profileId?: string) => {
-      const result = await ipatoolApi.login(
-        String(email ?? ''),
-        String(password ?? ''),
-        authCode,
-        profileId
-      )
-      const isActive = !profileId || profileId === profiles.active().id
-      if (result.status === 'ok' && result.account && isActive) setAccount(result.account)
-      return result
-    }
-  )
+  ipcMain.handle(IPC.AuthLogin, async (_e, email: string, password: string, authCode?: string) => {
+    const result = await ipatoolApi.login(String(email ?? ''), String(password ?? ''), authCode)
+    if (result.status === 'ok' && result.account) setAccount(result.account)
+    return result
+  })
 
   ipcMain.handle(IPC.AuthAccount, () => cachedAccount)
 
-  ipcMain.handle(IPC.AuthRefresh, async (_e, profileId?: string) => {
-    const account = await ipatoolApi.accountInfoOrNull(profileId).catch(() => null)
-    if (!profileId || profileId === profiles.active().id) setAccount(account)
+  ipcMain.handle(IPC.AuthRefresh, async () => {
+    const account = await ipatoolApi.accountInfoOrNull().catch(() => null)
+    setAccount(account)
     return account
   })
 
@@ -572,26 +466,7 @@ export function applySettings(settings: Settings): void {
 }
 
 /** Profiles annotated with active flag, resolved directory and password state. */
-async function profileViews(): Promise<ProfileView[]> {
-  const activeId = profiles.active().id
-  // Parallel: the per-profile credential lookup is independent I/O, and this
-  // helper sits in the hot path of ~11 IPC handlers.
-  return Promise.all(
-    profiles.list().map(async (profile): Promise<ProfileView> => ({
-      ...profile,
-      active: profile.id === activeId,
-      dir: profiles.dirFor(profile),
-      hasPassword: await credentials.has(profile.id)
-    }))
-  )
-}
 
-/** Re-reads the active profile's session and broadcasts it. */
-async function refreshActiveAccount(): Promise<AccountInfo | null> {
-  const account = await ipatoolApi.accountInfoOrNull().catch(() => null)
-  setAccount(account)
-  return account
-}
 
 /** Emits task/queue events to the renderer and raises OS notifications. */
 export function registerEventForwarding(): void {

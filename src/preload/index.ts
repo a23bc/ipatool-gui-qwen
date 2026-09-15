@@ -14,9 +14,8 @@ import {
   type EventChannel,
   type EventPayloadMap,
   type FileFilter,
-  type ProfileView,
   type RendererApi,
-  type SwitchResult
+
 } from '../shared/ipc'
 import type {
   AccountInfo,
@@ -101,27 +100,10 @@ const api: RendererApi = {
   uninstallEngine: (): Promise<EngineStatus> => ipcRenderer.invoke(IPC.EngineUninstall),
   checkAppUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(IPC.AppCheckUpdate),
 
-  listProfiles: (): Promise<ProfileView[]> => ipcRenderer.invoke(IPC.ProfilesList),
-  addProfile: (name: string): Promise<ProfileView[]> => ipcRenderer.invoke(IPC.ProfilesAdd, name),
-  removeProfile: (id: string): Promise<{ profiles: ProfileView[]; removedDir: boolean }> =>
-    ipcRenderer.invoke(IPC.ProfilesRemove, id),
-  renameProfile: (id: string, name: string): Promise<ProfileView[]> =>
-    ipcRenderer.invoke(IPC.ProfilesRename, id, name),
-  setActiveProfile: (id: string): Promise<SwitchResult> => ipcRenderer.invoke(IPC.ProfilesSetActive, id),
-  setProfilePassword: (id: string, password: string, email: string): Promise<ProfileView[]> =>
-    ipcRenderer.invoke(IPC.ProfilesSetPassword, id, password, email),
-  forgetProfilePassword: (id: string): Promise<ProfileView[]> =>
-    ipcRenderer.invoke(IPC.ProfilesForgetPassword, id),
-  refreshProfileInfo: (id: string): Promise<{ profiles: ProfileView[]; account: AccountInfo | null }> =>
-    ipcRenderer.invoke(IPC.ProfilesRefreshInfo, id),
-  setProfileStateDir: (id: string, dir: string): Promise<ProfileView[]> =>
-    ipcRenderer.invoke(IPC.ProfilesSetStateDir, id, dir),
-
-  login: (email: string, password: string, authCode?: string, profileId?: string): Promise<LoginResult> =>
-    ipcRenderer.invoke(IPC.AuthLogin, email, password, authCode, profileId),
+  login: (email: string, password: string, authCode?: string): Promise<LoginResult> =>
+    ipcRenderer.invoke(IPC.AuthLogin, email, password, authCode),
   getAccount: (): Promise<AccountInfo | null> => ipcRenderer.invoke(IPC.AuthAccount),
-  refreshAccount: (profileId?: string): Promise<AccountInfo | null> =>
-    ipcRenderer.invoke(IPC.AuthRefresh, profileId),
+  refreshAccount: (): Promise<AccountInfo | null> => ipcRenderer.invoke(IPC.AuthRefresh),
   revoke: (): Promise<Operation<{ revoked: boolean }>> => ipcRenderer.invoke(IPC.AuthRevoke),
 
   search: (request: SearchRequest): Promise<Operation<SearchResult>> =>

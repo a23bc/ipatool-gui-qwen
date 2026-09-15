@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LoginResult, LoginStatus } from '@shared/types'
 import { useAppStore } from '@renderer/store/app'
-import { useProfilesStore, activeProfile } from '@renderer/store/profiles'
 import { useUiStore } from '@renderer/store/ui'
 import { ErrorNotice } from '@renderer/components/ErrorNotice'
 import { Icon, Spinner } from '@renderer/components/Icon'
@@ -34,10 +33,6 @@ export function AuthModal(): ReactNode {
   const refreshAccount = useAppStore((state) => state.refreshAccount)
   const revokeAccount = useAppStore((state) => state.revokeAccount)
 
-  const profiles = useProfilesStore((state) => state.profiles)
-  const loadProfiles = useProfilesStore((state) => state.load)
-  const profile = activeProfile(profiles)
-
   const open = useUiStore((state) => state.authOpen)
   const setOpen = useUiStore((state) => state.setAuthOpen)
   const toast = useUiStore((state) => state.toast)
@@ -47,7 +42,6 @@ export function AuthModal(): ReactNode {
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [remember, setRemember] = useState(Boolean(settings.lastEmail))
-  const [rememberPassword, setRememberPassword] = useState(false)
   const [step, setStep] = useState<Step>('credentials')
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<{ message: string; code: string | null } | null>(null)
@@ -63,20 +57,13 @@ export function AuthModal(): ReactNode {
       setCode('')
       return
     }
-    void loadProfiles()
     setStep('credentials')
-    // The active profile has no stored session: make sure a stale global
-    // account cannot turn this dialog into the wrong profile's info panel.
-    const current = activeProfile(useProfilesStore.getState().profiles)
-    if (current && !current.email) useAppStore.getState().setAccount(null)
     setPassword('')
     setCode('')
     setFailure(null)
     setBusy(false)
     setEmail(useAppStore.getState().settings.lastEmail)
-    // loadProfiles is a stable zustand reference; listing it keeps the
-    // exhaustive-deps contract honest without changing behaviour.
-  }, [open, loadProfiles])
+  }, [open])
 
   const submit = async (): Promise<void> => {
     if (busy) return
@@ -87,12 +74,7 @@ export function AuthModal(): ReactNode {
 
     let result: LoginResult
     try {
-      result = await window.api.login(
-        email.trim(),
-        password,
-        step === 'code' ? code.trim() : undefined,
-        profile?.id
-      )
+      result = await window.api.login(email.trim(), password, step === 'code' ? code.trim() : undefined)
     } catch (error) {
       // The bridge itself failed (main crashed, invoke rejected): roll the UI
       // back instead of leaving the dialog spinning forever, and scrub the
@@ -109,25 +91,7 @@ export function AuthModal(): ReactNode {
     if (result.status === 'ok') {
       if (remember) await updateSettings({ lastEmail: email.trim() })
       else if (settings.lastEmail) await updateSettings({ lastEmail: '' })
-      // Opt-in only: storing the password is what makes one-click switching
-      // possible on platforms whose keyring is a single machine-wide slot.
-      // A storage failure (e.g. no libsecret) must not undo a successful login.
-      const target = profile?.id
-      if (target) {
-        try {
-          if (rememberPassword) {
-            await useProfilesStore
-              .getState()
-              .storePassword(target, password, result.account?.email ?? email.trim())
-          } else {
-            await useProfilesStore.getState().forgetPassword(target)
-          }
-        } catch (error) {
-          toast({ kind: 'warn', message: t('auth.success', { email: result.account?.email ?? email }), detail: String(error) })
-        }
-      }
       useAppStore.getState().setAccount(result.account)
-      void useProfilesStore.getState().load()
       setOpen(false)
       toast({ kind: 'success', message: t('auth.success', { email: result.account?.email ?? email }) })
       setPassword('')
@@ -246,16 +210,6 @@ export function AuthModal(): ReactNode {
         >
           {step === 'credentials' ? (
             <>
-              {profile ? (
-                <p
-                  className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11.5px]"
-                  style={{ background: 'var(--panel-2)', color: 'var(--text-dim)' }}
-                >
-                  <Icon name="user" size={12} />
-                  {t('accounts.signInto', { name: profile.name })}
-                </p>
-              ) : null}
-
               <label className="flex flex-col gap-1.5">
                 <span className="text-[11.5px] font-medium dim">{t('auth.email')}</span>
                 <input
@@ -292,16 +246,7 @@ export function AuthModal(): ReactNode {
                 {t('auth.remember')}
               </label>
 
-              <label className="flex cursor-pointer items-start gap-2 text-[11.5px] dim">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  style={{ accentColor: 'var(--accent)' }}
-                  checked={rememberPassword}
-                  onChange={(event) => setRememberPassword(event.target.checked)}
-                />
-                <span>{t('auth.rememberPassword')}</span>
-              </label>
+
 
               <p className="text-[11.5px] leading-relaxed faint">{t('auth.slow')}</p>
             </>

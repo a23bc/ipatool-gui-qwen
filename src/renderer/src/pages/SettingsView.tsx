@@ -309,18 +309,30 @@ export function SettingsView(): ReactNode {
             </Field>
           ) : null}
 
-          <Field
-            label={t('settings.account.manage')}
-            hint={t('settings.account.manageHint')}
-          >
-            <button
-              type="button"
-              className="btn h-[28px]"
-              onClick={() => useUiStore.getState().setAccountsOpen(true)}
-            >
-              <Icon name="user" size={13} />
-              {t('accounts.title')}
-            </button>
+          <Field label={t('settings.account.stateDir')} hint={t('settings.account.stateDirHelp')} stacked>
+            <div className="flex items-center gap-2">
+              <TextInput
+                value={settings.stateDir}
+                onChange={(value) => void update({ stateDir: value })}
+                placeholder="~/.local/state/ipatool-gui"
+                mono
+                className="flex-1"
+              />
+              <button
+                type="button"
+                className="btn h-[30px]"
+                onClick={() => {
+                  void window.api
+                    .pickDirectory(t('settings.account.stateDir'), settings.stateDir || undefined)
+                    .then((picked) => {
+                      if (picked) void update({ stateDir: picked })
+                    })
+                }}
+              >
+                <Icon name="folder" size={13} />
+                {t('common.browse')}
+              </button>
+            </div>
           </Field>
 
           <Toggle

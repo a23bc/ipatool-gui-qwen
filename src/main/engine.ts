@@ -241,7 +241,14 @@ export class EngineManager extends EventEmitter {
    * this only exists so callers have one place to add process-wide variables.
    */
   childEnv(extra: Record<string, string> = {}): Record<string, string> {
-    return { ...extra }
+    const env = { ...extra }
+    const stateDir = settingsStore.getInternal().stateDir.trim()
+    if (stateDir !== '') {
+      // ipatool honours XDG_STATE_HOME on every platform, which lets the GUI keep
+      // its session separate from the terminal CLI's.
+      env.XDG_STATE_HOME = stateDir
+    }
+    return env
   }
 
   /**

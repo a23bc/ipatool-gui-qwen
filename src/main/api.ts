@@ -60,7 +60,6 @@ import {
 import { classifyError, shorten, type IpatoolErrorCode } from '../shared/ipatool/errors'
 import { secretValuesFromArgs } from '../shared/redact'
 import { engineManager } from './engine'
-import * as profiles from './profiles'
 import { settingsStore } from './settings'
 import { taskRegistry } from './tasks'
 import { startProcess, type RunOutcome, type StreamName } from './runner'
@@ -83,8 +82,6 @@ interface ExecuteOptions {
   kind: TaskKind
   label: string
   args: string[]
-  /** Profile to run as; defaults to the active one. */
-  profileId?: string
   /** Extra values to scrub from logs (the global passphrase is added automatically). */
   secrets?: string[]
   /** Keep ipatool interactive so it renders its progress bar. */
@@ -178,31 +175,6 @@ export class IpatoolApi {
     const settings = settingsStore.getInternal()
     const passphrase = await settingsStore.effectivePassphrase()
 
-    // Session isolation: every invocation runs against one profile's state dir.
-    // An explicit profileId is authoritative; the fallback is the synchronous
-    // in-memory active mirror, never a re-read of persisted settings.
-    const profile =
-      (options.profileId ? profiles.get(options.profileId) : null) ?? profiles.active()
-    profiles.touch(profile.id)
-
-    // Guard against silently acting as the wrong account: if this profile's
-    // session was previously observed to belong to a different e-mail than the
-    // profile records, refuse and ask for a re-login.
-    if (options.kind !== 'login' && options.kind !== 'account') {
-      const observed = profiles.recordedSessionEmail(profile.id)
-      if (observed && profile.email && observed.toLowerCase() !== profile.email.toLowerCase()) {
-        throw new ApiError(
-          `Session mismatch for ${profile.name}: stored ${profile.email}, session ${observed}`,
-          'session-mismatch',
-          'guard',
-          null,
-          false,
-          true
-        )
-      }
-    }
-    const profileEnv = profiles.envFor(profile)
-    await profiles.ensureDir(profile)
 
     const args = withGlobals(options.args, {
       format: 'json',
@@ -220,18 +192,15 @@ export class IpatoolApi {
     const textLines: string[] = []
 
     taskRegistry.system(taskId, `exec: ${handle.record.command}`, 'debug')
-    taskRegistry.system(
-      taskId,
-      `profile: ${profile.name}${profile.email ? ` <${profile.email}>` : ''} @ ${profiles.dirFor(profile)}`,
-      'debug'
-    )
+    const stateDir = settings.stateDir.trim()
+    taskRegistry.system(taskId, `session dir: ${stateDir || '(ipatool default)'}`, 'debug')
 
     const running = startProcess(binary, {
       args,
       cwd: options.cwd,
       timeoutMs: options.timeoutMs,
       secrets,
-      env: engineManager.childEnv(profileEnv),
+      env: engineManager.childEnv(),
       onLine: (line, stream, progress) => {
         if (progress) {
           // Progress renders are collapsed by the renderer's log store; keeping
@@ -321,19 +290,12 @@ export class IpatoolApi {
    * "2FA required" is a normal, recoverable state that the UI must render as a
    * second input step.
    */
-  async login(
-    email: string,
-    password: string,
-    authCode?: string,
-    profileId?: string
-  ): Promise<LoginResult> {
+  async login(email: string, password: string, authCode?: string): Promise<LoginResult> {
     const args = loginArgs(email, password, authCode)
-    const target = profiles.get(profileId ?? '') ?? profiles.active()
     let result: ExecuteResult
     try {
       result = await this.execute({
         kind: 'login',
-        profileId: target.id,
         label: authCode ? 'Login (2FA)' : 'Login',
         args,
         secrets: [password, authCode ?? ''],
@@ -372,8 +334,6 @@ export class IpatoolApi {
         name: readString(success, 'name'),
         email: readString(success, 'email') || email
       }
-      profiles.setInfo(target.id, account.email, account.name)
-      profiles.noteSessionEmail(target.id, account.email)
       return { status: 'ok', account, message: '', taskId }
     }
 
@@ -398,11 +358,10 @@ export class IpatoolApi {
     return loginStatusFromCode(code)
   }
 
-  async accountInfo(profileId?: string): Promise<AccountInfo> {
+  async accountInfo(): Promise<AccountInfo> {
     const result = await this.execute({
       kind: 'account',
       label: 'Account info',
-      profileId,
       args: accountInfoArgs(),
       timeoutMs: 60_000
     })
@@ -411,24 +370,21 @@ export class IpatoolApi {
   }
 
   /** Returns null instead of throwing when the user is simply not signed in. */
-  async accountInfoOrNull(profileId?: string): Promise<AccountInfo | null> {
+  async accountInfoOrNull(): Promise<AccountInfo | null> {
     try {
-      const info = await this.accountInfo(profileId)
-      const target = profiles.get(profileId ?? '') ?? profiles.active()
-      profiles.setInfo(target.id, info.email, info.name)
-      profiles.noteSessionEmail(target.id, info.email)
-      return info
+      return await this.accountInfo()
     } catch {
-      profiles.noteSessionEmail(
-        (profiles.get(profileId ?? '') ?? profiles.active()).id,
-        null
-      )
       return null
     }
   }
 
   async revoke(): Promise<{ revoked: boolean }> {
-    const result = await this.execute({ kind: 'revoke', label: 'Revoke credentials', args: revokeArgs(), timeoutMs: 60_000 })
+    const result = await this.execute({
+      kind: 'revoke',
+      label: 'Revoke credentials',
+      args: revokeArgs(),
+      timeoutMs: 60_000
+    })
     this.assertSuccess(result, 'Could not revoke credentials')
     return { revoked: true }
   }
@@ -536,7 +492,6 @@ export class IpatoolApi {
    */
   async download(
     options: {
-      profileId?: string
       selector: AppSelector
       output: string
       externalVersionID?: string
@@ -549,7 +504,6 @@ export class IpatoolApi {
     const result = await this.execute({
       kind: 'download',
       label: 'Download',
-      profileId: options.profileId,
       interactive: true,
       cwd: options.output || undefined,
       args: downloadArgs({

@@ -28,7 +28,6 @@ import { MovingAverage } from '../shared/format'
 import { mergeProgress, type ProgressSample } from '../shared/ipatool/parse'
 import { classifyError, shorten } from '../shared/ipatool/errors'
 import { ApiError, ipatoolApi } from './api'
-import * as profiles from './profiles'
 import { settingsStore } from './settings'
 import { taskRegistry } from './tasks'
 
@@ -105,7 +104,6 @@ export class DownloadQueue extends EventEmitter {
     const progress = raw.progress
     return {
       id: raw.id,
-      profileId: typeof raw.profileId === 'string' ? raw.profileId : '',
       appId: Number(raw.appId ?? 0),
       bundleID: String(raw.bundleID ?? ''),
       name: String(raw.name ?? raw.bundleID ?? raw.id),
@@ -212,7 +210,6 @@ export class DownloadQueue extends EventEmitter {
         id,
         // Remember the account: resuming under a different session would fail
         // (or worse, purchase under the wrong Apple ID).
-        profileId: profiles.active().id,
         appId,
         bundleID,
         name: request.name?.trim() || bundleID || `App ${appId}`,
@@ -478,7 +475,6 @@ export class DownloadQueue extends EventEmitter {
     try {
       const outcome = await ipatoolApi.download(
         {
-          profileId: item.profileId || undefined,
           selector: {
             ...(item.appId ? { appId: item.appId } : {}),
             ...(item.bundleID ? { bundleID: item.bundleID } : {})
@@ -544,7 +540,7 @@ export class DownloadQueue extends EventEmitter {
     handle.pollTimer = null
   }
 
-  private fail(item: QueueItem, message: string): void {
+  private fail(item: QueueItem, message: string, code?: string): void {
     const classified = classifyError(message)
     this.progressStamps.delete(item.id)
     item.state = 'error'
@@ -553,7 +549,7 @@ export class DownloadQueue extends EventEmitter {
     item.error = {
       message: shorten(classified.message || message, 500),
       // The renderer maps this code onto a translated, actionable hint.
-      hint: classified.code
+      hint: code ?? classified.code
     }
     this.persist()
     this.emitSnapshot(true)

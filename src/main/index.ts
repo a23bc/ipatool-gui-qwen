@@ -7,13 +7,14 @@
  * after `ready-to-show`. Nothing on the critical path awaits the network.
  */
 
+import { rm } from 'node:fs/promises'
+import path from 'node:path'
 import { app, BrowserWindow, dialog, nativeTheme } from 'electron'
 import { mkdir } from 'node:fs/promises'
 import { applySettings, registerEventForwarding, registerIpc } from './ipc'
 import { createMainWindow } from './window'
 import { settingsStore } from './settings'
 import { engineManager } from './engine'
-import { migrateLegacyState } from './profiles'
 import { downloadQueue } from './queue'
 import { ipatoolApi } from './api'
 import { taskRegistry } from './tasks'
@@ -43,6 +44,10 @@ async function bootstrap(): Promise<void> {
   const settings = await settingsStore.load()
   nativeTheme.themeSource = settings.theme
   taskRegistry.setLineCap(settings.maxLogLines)
+
+  // Plan-v2 upgrade: stored passwords are gone by design. Remove any legacy
+  // credential material from disk rather than leaving dead secrets behind.
+  await rm(path.join(app.getPath('userData'), 'credentials.json'), { force: true }).catch(() => {})
 
   registerEventForwarding()
   registerIpc()
@@ -113,15 +118,6 @@ async function confirmClose(busy: boolean): Promise<void> {
 
 /** Engine detection, account refresh and queue restore - all non-blocking. */
 async function postStartup(): Promise<void> {
-  // Must complete before the first ipatool invocation, but NOT before first
-  // paint: it is filesystem work (stat/mkdir/rename), and the profile IPC
-  // handlers await the same cached promise if they somehow run earlier. Even
-  // in that race the migration below degrades safely: an existing target
-  // session quarantines ~/.ipatool instead of adopting it.
-  const migration = await migrateLegacyState().catch(() => null)
-  if (migration === 'migrated') console.info('[main] migrated legacy ~/.ipatool into the default profile')
-  if (migration === 'quarantined') console.info('[main] quarantined stale ~/.ipatool (a session already existed)')
-
   try {
     await downloadQueue.load()
   } catch {
