@@ -37,21 +37,22 @@ jobs:
             flag: '--x64'
             extra: ''
             label: 'Windows x64'
-          # CI builds zip, not dmg: GitHub macOS runners cannot run
-          # `hdiutil attach` ("Device not configured"), which dmg-builder needs.
+          # CI builds the unpacked .app (dir target) and tars it into a runnable
+          # package: GitHub macOS runners cannot run `hdiutil attach`
+          # ("Device not configured"), which the dmg target requires.
           # A local `npm run dist:mac` on a real Mac still produces the dmg.
           - os: macos-14
             platform: mac
             arch: x64
             flag: '--x64'
-            extra: '-c.mac.target=zip'
-            label: 'macOS x64 (zip)'
+            extra: '-c.mac.target=dir'
+            label: 'macOS x64'
           - os: macos-14
             platform: mac
             arch: arm64
             flag: '--arm64'
-            extra: '-c.mac.target=zip'
-            label: 'macOS arm64 (zip)'
+            extra: '-c.mac.target=dir'
+            label: 'macOS arm64'
           - os: ubuntu-22.04
             platform: linux
             arch: x64
@@ -116,6 +117,20 @@ jobs:
           # certificate never silently changes the output.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      # macOS: turn the unpacked .app into a single runnable archive.
+      - name: Package the .app as a runnable tar.gz
+        if: matrix.platform == 'mac'
+        run: |
+          APP_DIR="$(find release -maxdepth 2 -name '*.app' -type d -print -quit)"
+          if [ -z "$APP_DIR" ]; then
+            echo "::error::electron-builder produced no .app directory"
+            exit 1
+          fi
+          VERSION="$(node -p "require('./package.json').version")"
+          OUT="release/ipatool-gui-${VERSION}-mac-${{ matrix.arch }}.app.tar.gz"
+          tar -czf "$OUT" -C "$(dirname "$APP_DIR")" "$(basename "$APP_DIR")"
+          echo "packaged $OUT from $APP_DIR"
+
       - name: List artifacts
         run: ls -lh release/
 
@@ -153,7 +168,7 @@ jobs:
           path: |
             release/*.exe
             release/*.dmg
-            release/*.zip
+            release/*.app.tar.gz
             release/*.AppImage
             release/*.deb
           if-no-files-found: error
@@ -180,7 +195,7 @@ jobs:
           gh release create "$TAG" \
             --title "IPATool GUI ${TAG}" \
             --draft \
-            --notes "Installers for Windows (NSIS + portable), macOS (zip; build a dmg locally with npm run dist:mac) and Linux (AppImage, deb).
+            --notes "Windows: NSIS installer + portable exe. Linux: deb + AppImage. macOS: runnable .app.tar.gz (build the dmg installer locally with npm run dist:mac).
 
           Builds are **unsigned**: on macOS right-click → Open the first time; on Windows accept the SmartScreen prompt.
 

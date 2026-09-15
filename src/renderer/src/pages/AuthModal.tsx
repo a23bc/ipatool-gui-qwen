@@ -57,6 +57,10 @@ export function AuthModal(): ReactNode {
     if (!open) return
     void loadProfiles()
     setStep('credentials')
+    // The active profile has no stored session: make sure a stale global
+    // account cannot turn this dialog into the wrong profile's info panel.
+    const current = activeProfile(useProfilesStore.getState().profiles)
+    if (current && !current.email) useAppStore.getState().setAccount(null)
     setPassword('')
     setCode('')
     setFailure(null)

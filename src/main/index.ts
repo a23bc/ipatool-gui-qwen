@@ -45,8 +45,9 @@ async function bootstrap(): Promise<void> {
   taskRegistry.setLineCap(settings.maxLogLines)
 
   // Must happen before any ipatool invocation: see profiles.migrateLegacyState.
-  const migrated = await migrateLegacyState().catch(() => null)
-  if (migrated) console.info('[main] migrated legacy ipatool state to', migrated)
+  const migration = await migrateLegacyState().catch(() => null)
+  if (migration === 'migrated') console.info('[main] migrated legacy ~/.ipatool into the default profile')
+  if (migration === 'quarantined') console.info('[main] quarantined stale ~/.ipatool (a session already existed)')
 
   registerEventForwarding()
   registerIpc()

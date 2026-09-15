@@ -30,6 +30,7 @@ import { artworkCache } from './artwork'
 import { downloadQueue } from './queue'
 import { engineManager, EngineError } from './engine'
 import * as profiles from './profiles'
+import { migrateLegacyState } from './profiles'
 import { settingsStore } from './settings'
 import { taskRegistry } from './tasks'
 import { APP_PRODUCT, APP_VERSION, checkAppUpdate } from './update'
@@ -141,8 +142,12 @@ export function registerIpc(): void {
 
   ipcMain.handle(IPC.ProfilesList, () => profileViews())
 
-  ipcMain.handle(IPC.ProfilesAdd, (_e, name: string) => {
+  ipcMain.handle(IPC.ProfilesAdd, async (_e, name: string) => {
+    // A brand-new profile has no session; clear the cached account so the login
+    // dialog never shows the previous profile's identity.
+    await migrateLegacyState().catch(() => null)
     profiles.add(String(name ?? ''))
+    setAccount(null)
     return profileViews()
   })
 
@@ -170,7 +175,11 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.ProfilesSetActive, async (_e, id: string) => {
+    await migrateLegacyState().catch(() => null)
     profiles.setActive(String(id))
+    // Immediately drop the previous identity so no UI can show it for the new
+    // profile, then read the new profile's real session.
+    setAccount(null)
     const account = await refreshActiveAccount()
     return { profiles: profileViews(), account }
   })

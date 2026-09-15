@@ -136,8 +136,10 @@ ipatool 把唯一会话（keyring 文件 + cookie jar）放在状态目录里，
 > | Actions → Release → Run workflow | 同上；勾选 `publish` 才会额外创建 **Draft** Release |
 >
 > artifact 按「平台+架构」拆分上传：只想要 Linux x64 时不必把 arm64 或别的平台一起下载。
-> macOS 在 CI 上产 **zip**（GitHub 的 macOS runner 无法运行 dmg 所需的 `hdiutil attach`，
-> 会报 `Device not configured`）；在真实 Mac 上 `npm run dist:mac` 仍会产 dmg。
+> macOS 在 CI 上产 **`.app.tar.gz` 运行包**（GitHub 的 macOS runner 无法运行 dmg 所需的
+> `hdiutil attach`，会报 `Device not configured`，故用 `dir` target + tar）；
+> 在真实 Mac 上 `npm run dist:mac` 仍会产 dmg 安装包。
+> 各平台产物：Windows = NSIS 安装包 + portable 运行包；Linux = deb 安装包 + AppImage 运行包。
 >
 > Draft 不是公开状态，仍需到 Releases 页手动点 Publish 才对外可见。
 > 地下开发阶段只要不勾 `publish`，仓库对外不会留下任何 Release 痕迹。

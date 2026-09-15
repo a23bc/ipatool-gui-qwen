@@ -189,7 +189,7 @@ function ensureDefaultAfterWipe(): Profile {
  *
  * Returns the new location, or null when there was nothing to migrate.
  */
-export async function migrateLegacyState(): Promise<string | null> {
+export async function migrateLegacyState(): Promise<'migrated' | 'quarantined' | null> {
   const legacy = path.join(os.homedir(), '.ipatool')
   const target = path.join(dirFor(ensureDefault()), 'ipatool')
 
@@ -203,13 +203,26 @@ export async function migrateLegacyState(): Promise<string | null> {
   }
 
   if (!(await exists(legacy))) return null
-  // Never clobber an existing session.
-  if (await exists(target)) return null
-
   await mkdir(path.dirname(target), { recursive: true }).catch(() => {})
+
+  if (!(await exists(target))) {
+    // Normal migration: adopt the legacy session as the default profile.
+    try {
+      await renameDir(legacy, target)
+      return 'migrated'
+    } catch {
+      return null
+    }
+  }
+
+  // Both exist. Leaving the legacy directory in place is dangerous: upstream
+  // would then (a) fall back to it for every profile, or (b) move it into the
+  // next profile that runs. Rename it out of ipatool's sight but keep it on
+  // disk so nothing is destroyed.
+  const backup = `${legacy}.ipatool-gui-backup-${Date.now().toString(36)}`
   try {
-    await renameDir(legacy, target)
-    return target
+    await renameDir(legacy, backup)
+    return 'quarantined'
   } catch {
     return null
   }
