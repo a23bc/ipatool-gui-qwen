@@ -31,7 +31,7 @@
     "@eslint/js": "9.39.2",
     "@tailwindcss/vite": "4.1.17",
     "@tanstack/react-virtual": "3.14.13",
-    "@types/node": "22.19.1",
+    "@types/node": "26.5.1",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
