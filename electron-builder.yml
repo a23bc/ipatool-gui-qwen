@@ -3,6 +3,17 @@
 # The app ships *no* node_modules: main and preload are fully bundled by esbuild,
 # so `files` only needs the bundle plus package.json. That is what keeps the
 # installer near the size of the code itself rather than a Node_modules tree.
+#
+# ── Signing / publishing policy ─────────────────────────────────────────────
+# Builds from this repository are UNSIGNED by default (no signing credentials
+# in CI); Gatekeeper / SmartScreen warnings are expected and the README
+# explains how to open them.
+#
+# ⚠️  There is deliberately NO `publish:` section. Releases are uploaded by CI
+# with `gh release create`. Do NOT switch this project to electron-updater
+# unless code signing (and, on macOS, notarisation) is enabled first: an
+# unsigned auto-update channel is a remote-code-execution vector - whoever can
+# swap latest.yml / the artifact on the feed controls what every client runs.
 appId: dev.ipatoolgui.desktop
 productName: IPATool GUI
 copyright: Copyright © 2026 ipatool-gui contributors
@@ -25,11 +36,15 @@ npmRebuild: false
 nodeGypRebuild: false
 buildDependenciesFromSource: false
 
-# Builds are unsigned by design (no signing credentials in CI). Gatekeeper and
-# SmartScreen warnings are expected; the README explains how to open them.
 win:
   icon: build/icon.png
   artifactName: ${name}-${version}-win-${arch}.${ext}
+  # Unsigned by default. Forks with a code-signing certificate can enable it
+  # WITHOUT editing this file by exporting:
+  #   WIN_CSC_LINK (or CSC_LINK) = path/base64 of the .pfx
+  #   CSC_KEY_PASSWORD           = certificate password
+  # electron-builder picks these up automatically (signtool / Azure Trusted
+  # Signing), which removes the SmartScreen / Defender-PUA friction.
   target:
     - target: nsis
       arch: [x64]
@@ -48,11 +63,17 @@ mac:
   icon: build/icon.png
   category: public.app-category.utilities
   artifactName: ${name}-${version}-mac-${arch}.${ext}
-  # Unsigned distribution: skip notarisation/hardening so the build works from
-  # any fork without Apple Developer credentials.
-  identity: null
-  hardenedRuntime: false
-  gatekeeperAssess: false
+  # Unsigned by default: no `identity` is configured, so electron-builder
+  # skips signing when no certificate is discoverable (the CI case).
+  #
+  # Forks with an Apple Developer ID certificate should export:
+  #   CSC_LINK         = base64 of the Developer ID Application .p12
+  #   CSC_KEY_PASSWORD = .p12 password
+  # electron-builder then signs automatically. When signing, also enable the
+  # hardened runtime and notarisation (required by Gatekeeper on modern macOS):
+  #   -c.mac.hardenedRuntime=true -c.mac.notarize.teamId=<TEAM_ID>
+  # with APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD in the environment.
+  notarize: false
   target:
     - target: dmg
       arch: [x64, arm64]
@@ -75,7 +96,3 @@ linux:
       Name: IPATool GUI
       Comment: Search the App Store and download .ipa packages via ipatool
       Terminal: false
-
-publish:
-  provider: github
-  releaseType: draft
