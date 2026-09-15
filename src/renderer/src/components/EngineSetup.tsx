@@ -40,37 +40,47 @@ export function EngineSetup(): ReactNode {
 
   const install = async (): Promise<void> => {
     setInstalling(true)
-    const status = await installEngine()
-    setInstalling(false)
-    if (status.state === 'ready') {
-      dismissSetup()
-      setDismissed(true)
-      toast({ kind: 'success', message: t('engine.setup.done', { version: status.version ?? '' }) })
-    } else {
-      toast({
-        kind: 'error',
-        message: t('toast.engineFailed'),
-        detail: status.message ?? undefined
-      })
+    try {
+      const status = await installEngine()
+      if (status.state === 'ready') {
+        dismissSetup()
+        setDismissed(true)
+        toast({ kind: 'success', message: t('engine.setup.done', { version: status.version ?? '' }) })
+      } else {
+        toast({
+          kind: 'error',
+          message: t('toast.engineFailed'),
+          detail: status.message ?? undefined
+        })
+      }
+    } catch (error) {
+      // A rejected IPC call must not leave the install button disabled forever.
+      toast({ kind: 'error', message: t('toast.engineFailed'), detail: String(error) })
+    } finally {
+      setInstalling(false)
     }
   }
 
   const chooseManual = async (): Promise<void> => {
-    const picked = await window.api.pickFile('ipatool', [
-      {
-        name: 'ipatool',
-        extensions: appInfo?.platform === 'win32' ? ['exe'] : ['*']
+    try {
+      const picked = await window.api.pickFile('ipatool', [
+        {
+          name: 'ipatool',
+          extensions: appInfo?.platform === 'win32' ? ['exe'] : ['*']
+        }
+      ])
+      if (!picked) return
+      await updateSettings({ ipatoolPath: picked, autoInstallEngine: false })
+      const status = await detectEngine(true)
+      if (engineReady(status)) {
+        setDismissed(true)
+        dismissSetup()
+        toast({ kind: 'success', message: t('engine.setup.done', { version: status.version ?? '' }) })
+      } else {
+        toast({ kind: 'error', message: status.message ?? t('toast.engineFailed') })
       }
-    ])
-    if (!picked) return
-    await updateSettings({ ipatoolPath: picked, autoInstallEngine: false })
-    const status = await detectEngine(true)
-    if (engineReady(status)) {
-      setDismissed(true)
-      dismissSetup()
-      toast({ kind: 'success', message: t('engine.setup.done', { version: status.version ?? '' }) })
-    } else {
-      toast({ kind: 'error', message: status.message ?? t('toast.engineFailed') })
+    } catch (error) {
+      toast({ kind: 'error', message: t('toast.engineFailed'), detail: String(error) })
     }
   }
 

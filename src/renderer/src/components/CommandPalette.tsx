@@ -33,8 +33,7 @@ export function fuzzyScore(needle: string, haystack: string): number | null {
   let score = 0
   let haystackIndex = 0
   let streak = 0
-  for (let i = 0; i < n.length; i += 1) {
-    const char = n[i]
+  for (const char of n) {
     const found = h.indexOf(char, haystackIndex)
     if (found < 0) return null
     streak = found === haystackIndex ? streak + 1 : 0

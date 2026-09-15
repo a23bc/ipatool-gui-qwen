@@ -31,6 +31,38 @@ export type IpatoolErrorCode =
   | 'canceled'
   | 'unknown'
 
+/**
+ * Runtime mirror of {@link IpatoolErrorCode}.
+ *
+ * The renderer receives `hint` codes through IPC as plain strings; this list
+ * lets it validate a code before building an i18n key from it, so an unknown
+ * code degrades to "no hint" instead of showing a raw `errors.x.hint` literal.
+ */
+export const IPATOOL_ERROR_CODES: readonly IpatoolErrorCode[] = [
+  'two-factor-required',
+  'passphrase-required',
+  'passphrase-invalid',
+  'not-signed-in',
+  'bad-credentials',
+  'account-locked',
+  'license-required',
+  'app-not-found',
+  'version-not-found',
+  'rate-limited',
+  'network',
+  'dns',
+  'tls',
+  'timeout',
+  'proxy',
+  'resume-failed',
+  'platform-mismatch',
+  'disk',
+  'engine-missing',
+  'session-mismatch',
+  'canceled',
+  'unknown'
+]
+
 export interface ClassifiedError {
   code: IpatoolErrorCode
   /** Original text, already trimmed and de-duplicated. */
@@ -140,7 +172,7 @@ const RULES: Rule[] = [
   {
     code: 'resume-failed',
     patterns: [
-      /416/,
+      /\b416\b/,
       /range not satisfiable/i,
       /requested range not satisfiable/i,
       /failed to seek file/i
@@ -158,7 +190,7 @@ const RULES: Rule[] = [
   },
   {
     code: 'dns',
-    patterns: [/no such host/i, /server misbehaving/i, /name resolution/i, /dns/i],
+    patterns: [/no such host/i, /server misbehaving/i, /name resolution/i, /\bdns\b/i],
     retryable: true
   },
   {
@@ -189,7 +221,7 @@ const RULES: Rule[] = [
       /network is unreachable/i,
       /request failed/i,
       /failed to download/i,
-      /EOF/i
+      /\bEOF\b/i
     ],
     retryable: true
   },
@@ -258,5 +290,10 @@ export function isPassphraseRequired(...parts: Array<string | null | undefined>)
 /** Truncates very long messages (Apple sometimes returns whole plists). */
 export function shorten(message: string, max = 400): string {
   if (message.length <= max) return message
-  return `${message.slice(0, max).trimEnd()}…`
+  let cut = message.slice(0, max)
+  // Never cut between a UTF-16 surrogate pair; a lone surrogate would render
+  // as garbage (or break JSON round-trips) in the UI and exported logs.
+  const lastUnit = cut.charCodeAt(cut.length - 1)
+  if (lastUnit >= 0xd800 && lastUnit <= 0xdbff) cut = cut.slice(0, -1)
+  return `${cut.trimEnd()}…`
 }

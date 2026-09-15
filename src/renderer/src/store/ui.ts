@@ -95,6 +95,11 @@ export const useUiStore = create<UiState>()((set, get) => ({
   confirm: null,
   askConfirm: (request) =>
     new Promise<boolean>((resolve) => {
+      // A second dialog while one is open would overwrite (and orphan) the
+      // first request's resolver: its promise would never settle and the
+      // caller would hang. Resolve the stale one as "cancelled" instead.
+      const current = get().confirm
+      if (current) current.resolve(false)
       set({ confirm: { ...request, resolve } })
     }),
   resolveConfirm: (ok) => {

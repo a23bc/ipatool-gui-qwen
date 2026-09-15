@@ -198,6 +198,7 @@ export const Header = memo(function Header(): ReactNode {
 
   const platform = useSearchStore((state) => state.platform)
   const setPlatform = useSearchStore((state) => state.setPlatform)
+  const setLimit = useSearchStore((state) => state.setLimit)
 
   const setView = useUiStore((state) => state.setView)
   const setPaletteOpen = useUiStore((state) => state.setPaletteOpen)
@@ -205,11 +206,17 @@ export const Header = memo(function Header(): ReactNode {
   const inputRef = useRef<HTMLInputElement>(null)
   const padding = useChromePadding()
 
-  // The search store owns `platform`, but Settings owns the default; keep them in
-  // sync so changing the default applies to the next search.
+  // The search store owns `platform`/`limit`, but Settings owns the defaults;
+  // keep them in sync so changing a default applies to the next search. (The
+  // store's initial values were read from the placeholder settings snapshot -
+  // without this, `limit` never picked up the real searchLimit at all.)
   useEffect(() => {
     setPlatform(settings.defaultPlatform)
   }, [settings.defaultPlatform, setPlatform])
+
+  useEffect(() => {
+    setLimit(settings.searchLimit)
+  }, [settings.searchLimit, setLimit])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {

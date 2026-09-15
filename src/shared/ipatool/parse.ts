@@ -31,8 +31,12 @@
  */
 
 // Matches CSI/OSC escape sequences emitted by progressbar (cursor moves, erase
-// line, colour codes). Control characters are unavoidable here.
-const ANSI_RE = /[\u001b\u009b][[()#;?]*(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]/g
+// line, colour codes, window-title OSC records). Control characters are
+// unavoidable here. The first alternative covers OSC (ESC ] ...) terminated by
+// BEL or ST, which the generic CSI pattern would only strip partially.
+const ANSI_RE =
+  // eslint-disable-next-line no-control-regex -- ANSI escapes ARE control characters.
+  /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[\u001b\u009b][[()#;?]*(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]/g
 
 /** Removes ANSI/VT escape sequences so progress renders can be read as text. */
 export function stripAnsi(input: string): string {
@@ -123,7 +127,9 @@ const PERCENT_RE = /(\d{1,3}(?:\.\d+)?)\s*%/
 const DECIMAL_ORDER = ['b', 'kb', 'mb', 'gb', 'tb', 'pb', 'eb']
 
 /** Converts a progressbar suffix into a byte multiplier (base 1000 or 1024). */
-export function unitMultiplier(unit: string): number {
+/** Accepts `undefined` so regex capture groups can be passed directly. */
+export function unitMultiplier(unit: string | undefined): number {
+  if (unit === undefined) return 1
   const lower = unit.toLowerCase()
   const iec = lower.includes('i')
   const base = iec ? 1024 : 1000
@@ -133,7 +139,9 @@ export function unitMultiplier(unit: string): number {
   return base ** index
 }
 
-function toNumber(raw: string): number | null {
+/** Accepts `undefined` so regex capture groups can be passed directly. */
+function toNumber(raw: string | undefined): number | null {
+  if (raw === undefined) return null
   // progressbar never emits thousands separators, but "12,5" style decimals
   // appear in some locales; normalise both.
   const cleaned = raw.replace(/\s/g, '').replace(',', '.')
@@ -340,5 +348,5 @@ export function parseSha256Sum(text: string): { hash: string; file: string } | n
 /** Parses `ipatool version 2.6.0` / bare `2.6.0` output of `ipatool --version`. */
 export function parseVersion(text: string): string | null {
   const match = text.match(/(\d+\.\d+\.\d+[-\w.]*)/)
-  return match ? match[1] : null
+  return match?.[1] ?? null
 }

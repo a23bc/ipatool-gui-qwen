@@ -13,6 +13,9 @@ import { VirtualList } from '@renderer/components/VirtualList'
 const TASK_ROW = 52
 const LOG_ROW = 19
 
+/** Stable empty array so the lines selector never returns a fresh reference. */
+const NO_LINES: LogLine[] = []
+
 const LEVEL_COLOR: Record<LogLine['level'], string> = {
   info: 'var(--text-dim)',
   debug: 'var(--text-faint)',
@@ -76,7 +79,13 @@ const LogRow = memo(function LogRow({ line }: { line: LogLine }): ReactNode {
 export function ActivityView(): ReactNode {
   const t = useAppStore((state) => state.t)
   const tasks = useTasksStore((state) => state.tasks)
-  const lines = useTasksStore(state => state.lines)
+  // Subscribe to the *selected* task's line array, not the whole Record: the
+  // Record gets a new identity on every log line of every task, which used to
+  // re-render this whole view (task list + virtualized log) at log frequency
+  // even while an unrelated background task was producing output.
+  const selectedLines = useTasksStore((state) =>
+    state.selectedId ? (state.lines[state.selectedId] ?? NO_LINES) : NO_LINES
+  )
   const selectedId = useTasksStore((state) => state.selectedId)
   const filter = useTasksStore((state) => state.filter)
   const select = useTasksStore((state) => state.select)
@@ -92,12 +101,11 @@ export function ActivityView(): ReactNode {
   )
 
   const visibleLines = useMemo(() => {
-    if (!selectedId) return []
-    const all = lines[selectedId] ?? []
+    if (!selectedId) return NO_LINES
     const needle = filter.trim().toLowerCase()
-    if (!needle) return all
-    return all.filter((line) => line.text.toLowerCase().includes(needle))
-  }, [lines, selectedId, filter])
+    if (!needle) return selectedLines
+    return selectedLines.filter((line) => line.text.toLowerCase().includes(needle))
+  }, [selectedLines, selectedId, filter])
 
   const taskKey = useCallback((task: TaskRecord) => task.id, [])
   const renderTask = useCallback(

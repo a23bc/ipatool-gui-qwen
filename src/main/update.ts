@@ -22,6 +22,8 @@ export const APP_REPO: string = typeof __APP_REPO__ === 'string' ? __APP_REPO__ 
 declare const __APP_PRODUCT__: string
 export const APP_PRODUCT: string = typeof __APP_PRODUCT__ === 'string' ? __APP_PRODUCT__ : 'IPATool GUI'
 
+const UPDATE_CHECK_TIMEOUT_MS = 12_000
+
 interface GhRelease {
   tag_name: string
   html_url: string
@@ -47,9 +49,16 @@ export async function checkAppUpdate(): Promise<UpdateCheckResult> {
     return { ...base, error: 'update-check-not-configured' }
   }
 
+  // api.github.com can hang on bad networks; without a deadline the Settings
+  // button would spin forever.
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS)
+  timer.unref?.()
+
   try {
     const release = await fetchJson<GhRelease>(
-      `https://api.github.com/repos/${APP_REPO}/releases/latest`
+      `https://api.github.com/repos/${APP_REPO}/releases/latest`,
+      { signal: controller.signal }
     )
     const latest = release?.tag_name?.replace(/^v/, '') ?? ''
     if (!latest) return { ...base, error: 'no-release' }
@@ -63,5 +72,7 @@ export async function checkAppUpdate(): Promise<UpdateCheckResult> {
     }
   } catch (error) {
     return { ...base, error: error instanceof Error ? error.message : String(error) }
+  } finally {
+    clearTimeout(timer)
   }
 }

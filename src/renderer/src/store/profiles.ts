@@ -133,5 +133,8 @@ export const useProfilesStore = create<ProfilesState>()((set) => ({
   }
 }))
 
-export { asProfileViews, activeProfile } from '@shared/profiles'
-import { asProfileViews } from '@shared/profiles'
+// Re-exported for callers that historically imported these from this store.
+// (Import first, then re-export: ESM hoists both, but reading order matters.)
+import { activeProfile, asProfileViews } from '@shared/profiles'
+
+export { activeProfile, asProfileViews }

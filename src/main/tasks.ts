@@ -21,10 +21,13 @@ export interface TaskHandle {
   cancel: () => void
 }
 
+/** A canceller receives `hard` = skip the SIGTERM grace period (app quit). */
+export type TaskCanceller = (hard?: boolean) => void
+
 export class TaskRegistry extends EventEmitter {
   private readonly tasks = new Map<string, TaskRecord>()
   private readonly order: string[] = []
-  private readonly cancellers = new Map<string, () => void>()
+  private readonly cancellers = new Map<string, TaskCanceller>()
   private sequence = 0
   private lineCap = DEFAULT_LINE_CAP
 
@@ -67,7 +70,7 @@ export class TaskRegistry extends EventEmitter {
     }
   }
 
-  registerCanceller(id: string, cancel: () => void): void {
+  registerCanceller(id: string, cancel: TaskCanceller): void {
     this.cancellers.set(id, cancel)
   }
 
@@ -105,7 +108,12 @@ export class TaskRegistry extends EventEmitter {
   }
 
   list(): TaskRecord[] {
-    return this.order.map((id) => this.tasks.get(id)).filter(Boolean).map((t) => this.snapshot(t!)).reverse()
+    const out: TaskRecord[] = []
+    for (const id of this.order) {
+      const task = this.tasks.get(id)
+      if (task) out.push(this.snapshot(task))
+    }
+    return out.reverse()
   }
 
   /** Number of tasks currently running. */
@@ -133,9 +141,15 @@ export class TaskRegistry extends EventEmitter {
     return true
   }
 
-  /** Cancels every running task (used on app quit). */
-  cancelAll(): void {
-    for (const fn of this.cancellers.values()) fn()
+  /**
+   * Cancels every running task (used on app quit).
+   *
+   * `hard` skips the SIGTERM grace period: the runner's SIGKILL escalation
+   * timer is unref'd, so during teardown it may never fire and the child would
+   * be reparented to init and keep downloading.
+   */
+  cancelAll(hard = true): void {
+    for (const fn of this.cancellers.values()) fn(hard)
     this.cancellers.clear()
   }
 

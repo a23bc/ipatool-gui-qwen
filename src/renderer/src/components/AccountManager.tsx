@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ProfileView } from '@shared/ipc'
 import { useAppStore } from '@renderer/store/app'
@@ -40,6 +40,11 @@ export function AccountManager(): ReactNode {
   const [renameValue, setRenameValue] = useState('')
   const [editingDirId, setEditingDirId] = useState<string | null>(null)
   const [dirValue, setDirValue] = useState('')
+  // Enter commits and then unmounts the input, which can also fire blur with
+  // the same (stale-closure) handler; these guards make the second commit a
+  // no-op instead of sending the rename/setStateDir IPC twice.
+  const renameCommitted = useRef(false)
+  const dirCommitted = useRef(false)
 
   useEffect(() => {
     if (open && !loaded) void load()
@@ -48,21 +53,27 @@ export function AccountManager(): ReactNode {
   const current = activeProfile(profiles)
 
   const startRename = (profile: ProfileView): void => {
+    renameCommitted.current = false
     setRenamingId(profile.id)
     setRenameValue(profile.remark)
   }
 
   const commitRename = async (): Promise<void> => {
+    if (renameCommitted.current) return
+    renameCommitted.current = true
     if (renamingId) await rename(renamingId, renameValue)
     setRenamingId(null)
   }
 
   const startDirEdit = (profile: ProfileView): void => {
+    dirCommitted.current = false
     setEditingDirId(profile.id)
     setDirValue(profile.stateDir)
   }
 
   const commitDir = async (): Promise<void> => {
+    if (dirCommitted.current) return
+    dirCommitted.current = true
     if (editingDirId) await setStateDir(editingDirId, dirValue)
     setEditingDirId(null)
   }

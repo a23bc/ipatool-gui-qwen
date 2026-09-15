@@ -129,8 +129,9 @@ export function normalizeSettings(input: unknown): Settings {
   // Keep the placeholder counter ahead of any migrated profiles so generated
   // names can never collide with an existing one.
   if (out.profileCounter <= out.profiles.length) out.profileCounter = out.profiles.length + 1
-  if (!out.profiles.some((profile) => profile.id === out.activeProfileId)) {
-    out.activeProfileId = out.profiles[0].id
+  const firstProfile = out.profiles[0]
+  if (firstProfile && !out.profiles.some((profile) => profile.id === out.activeProfileId)) {
+    out.activeProfileId = firstProfile.id
   }
 
   if (out.artworkCountry.trim() === '') out.artworkCountry = 'us'
@@ -203,7 +204,9 @@ export class SettingsStore extends EventEmitter {
     const changed = JSON.stringify(next) !== JSON.stringify(this.settings)
     this.settings = next
     if (changed) {
-      void this.persist()
+      this.persist().catch((error: unknown) => {
+        console.warn('[settings] save failed:', error instanceof Error ? error.message : String(error))
+      })
       this.emit('change', this.get())
     }
     return this.get()
@@ -211,7 +214,9 @@ export class SettingsStore extends EventEmitter {
 
   reset(): Settings {
     this.settings = defaultSettings()
-    void this.persist()
+    this.persist().catch((error: unknown) => {
+      console.warn('[settings] save failed:', error instanceof Error ? error.message : String(error))
+    })
     this.emit('change', this.get())
     return this.get()
   }
@@ -228,8 +233,23 @@ export class SettingsStore extends EventEmitter {
       // Generate once and keep it, so repeated runs unlock the same keyring file.
       const generated = randomBytes(24).toString('base64url')
       this.settings.keychainPassphrase = generated
-      await this.persist()
-      return generated
+      try {
+        await this.persist()
+        return generated
+      } catch (error) {
+        // The passphrase could not be encrypted (no libsecret/kwallet): degrade
+        // loudly to passphraseMode=none instead of leaving it in memory or -
+        // worse - writing it to disk in cleartext.
+        console.warn(
+          '[settings] cannot protect the generated keychain passphrase; falling back to passphraseMode=none:',
+          error instanceof Error ? error.message : String(error)
+        )
+        this.settings.passphraseMode = 'none'
+        this.settings.keychainPassphrase = ''
+        await this.persist().catch(() => {})
+        this.emit('change', this.get())
+        return ''
+      }
     }
     return ''
   }
@@ -244,9 +264,15 @@ export class SettingsStore extends EventEmitter {
     this.emit('change', this.get())
   }
 
-  /** Serialises writes so concurrent updates cannot interleave. */
+  /**
+   * Serialises writes so concurrent updates cannot interleave.
+   *
+   * The returned promise rejects when the save fails (so `effectivePassphrase`
+   * can react to a refused encryption), while the internal chain swallows the
+   * error so one failed write can never wedge subsequent ones.
+   */
   private persist(): Promise<void> {
-    this.writeChain = this.writeChain.then(async () => {
+    const write = this.writeChain.then(async () => {
       const payload: Settings = {
         ...this.settings,
         keychainPassphrase: this.encryptSecret(this.settings.keychainPassphrase)
@@ -255,20 +281,30 @@ export class SettingsStore extends EventEmitter {
       const tmp = `${this.file}.${process.pid}.tmp`
       await writeFile(tmp, JSON.stringify(payload, null, 2), { encoding: 'utf8', mode: 0o600 })
       await rename(tmp, this.file)
-    }).catch(() => {
+    })
+    this.writeChain = write.catch(() => {
       /* a failed save must never crash the app */
     })
-    return this.writeChain
+    return write
   }
 
+  /**
+   * Encrypts a secret for disk. Throws when encryption is unavailable:
+   * silently falling back to a `plain:` value would write the keychain
+   * passphrase - the key to ipatool's keyring, which holds the Apple session -
+   * into settings.json in cleartext, defeating the module's core promise.
+   * `plain:` values are still *read* (decryptSecret) so an existing install is
+   * not locked out, but they are never written again.
+   */
   private encryptSecret(value: string): string {
     if (!value) return ''
-    if (!this.encryptionAvailable()) return `plain:${value}`
-    try {
-      return ENCRYPTED_PREFIX + safeStorage.encryptString(value).toString('base64')
-    } catch {
-      return `plain:${value}`
+    if (!this.encryptionAvailable()) {
+      throw new Error(
+        'Refusing to persist the keychain passphrase: safeStorage encryption is unavailable ' +
+          '(on Linux install libsecret / gnome-keyring, or set passphraseMode to "none")'
+      )
     }
+    return ENCRYPTED_PREFIX + safeStorage.encryptString(value).toString('base64')
   }
 
   private decryptSecret(value: string): string {

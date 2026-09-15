@@ -13,14 +13,20 @@
  * .sha256sum sidecar**, and extract the binary with the built-in tar reader.
  * Supply-chain-wise this is the same trust model as `brew install ipatool`, but
  * the checksum is checked rather than assumed.
+ *
+ * A configured GitHub mirror only ever accelerates the *asset download*. The
+ * checksum sidecar is always fetched from the canonical github.com URL: a
+ * mirror that served both the binary and its checksum could trivially vouch
+ * for a tampered artifact, which would silently void the verification above.
  */
 
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
-import { gunzipSync } from 'node:zlib'
+import { gunzip } from 'node:zlib'
+import { promisify } from 'node:util'
 import { mkdir, rename, rm, writeFile, chmod } from 'node:fs/promises'
 import { app } from 'electron'
-import type { EngineErrorCode, EngineRelease, EngineStatus } from '../shared/types'
+import type { EngineDownloadProgress, EngineErrorCode, EngineRelease, EngineStatus } from '../shared/types'
 import { parseSha256Sum, parseVersion } from '../shared/ipatool/parse'
 import { findTarFile, parseTar } from '../shared/tar'
 import {
@@ -35,6 +41,8 @@ import {
 import { isExecutable, isWindows, lookupOnPath, managedBinaryPath, managedDir, resolveEngine } from './paths'
 import { run } from './runner'
 import { settingsStore } from './settings'
+
+const gunzipAsync = promisify(gunzip)
 
 const IPATOOL_REPO = 'majd/ipatool'
 const API = `https://api.github.com/repos/${IPATOOL_REPO}`
@@ -103,10 +111,22 @@ export class EngineError extends Error {
   }
 }
 
+/**
+ * Download progress is throttled to this interval. fetchBuffer reports every
+ * streamed chunk (~16 KB), which for a 20 MB asset would be ~1250 IPC
+ * broadcasts; 10 Hz matches the download queue's progress cadence and is
+ * plenty smooth for a progress bar.
+ */
+const STATUS_THROTTLE_MS = 100
+
 export class EngineManager extends EventEmitter {
   private current: EngineStatus = status('idle')
   private detecting: Promise<EngineStatus> | null = null
   private installing: Promise<EngineStatus> | null = null
+  private statusTimer: NodeJS.Timeout | null = null
+  private pendingStatus: EngineStatus | null = null
+  private lastPhase: EngineStatus['state'] = 'idle'
+  private lastDownloadPhase: EngineDownloadProgress['phase'] | null = null
 
   get state(): EngineStatus {
     return this.current
@@ -114,7 +134,35 @@ export class EngineManager extends EventEmitter {
 
   private set(next: EngineStatus): EngineStatus {
     this.current = next
-    this.emit('status', next)
+
+    // Phase transitions (idle -> downloading -> ... -> ready, and the
+    // resolve/download/verify/extract sub-phases) must fire immediately; only
+    // intra-phase byte progress is throttled.
+    const downloadPhase = next.download?.phase ?? null
+    const phaseChanged = next.state !== this.lastPhase || downloadPhase !== this.lastDownloadPhase
+    this.lastPhase = next.state
+    this.lastDownloadPhase = downloadPhase
+
+    if (phaseChanged || next.state !== 'downloading') {
+      this.pendingStatus = null
+      if (this.statusTimer) {
+        clearTimeout(this.statusTimer)
+        this.statusTimer = null
+      }
+      this.emit('status', next)
+      return next
+    }
+
+    this.pendingStatus = next
+    if (!this.statusTimer) {
+      this.statusTimer = setTimeout(() => {
+        this.statusTimer = null
+        const pending = this.pendingStatus
+        this.pendingStatus = null
+        if (pending) this.emit('status', pending)
+      }, STATUS_THROTTLE_MS)
+      this.statusTimer.unref?.()
+    }
     return next
   }
 
@@ -267,7 +315,7 @@ export class EngineManager extends EventEmitter {
           throw new EngineError('No ipatool build for this platform', 'unsupported-arch')
         }
 
-        const { downloadUrl, checksumUrl } = urls
+        const { downloadUrl, checksumUrl, mirrored } = urls
 
         // The checksum is fetched first so a missing sidecar fails fast and
         // loudly instead of after a 20 MB download.
@@ -319,9 +367,11 @@ export class EngineManager extends EventEmitter {
             message:
               resolved.source === 'fallback'
                 ? `GitHub could not be queried; installed the last known good version ${tag}`
-                : expectedHash
-                  ? null
-                  : 'Installed without checksum verification (sidecar unavailable)'
+                : !expectedHash
+                  ? 'Installed without checksum verification (sidecar unavailable)'
+                  : mirrored
+                    ? 'Downloaded via the configured GitHub mirror; checksum verified against github.com'
+                    : null
           })
         )
       } catch (error) {
@@ -394,16 +444,27 @@ export class EngineManager extends EventEmitter {
    * its size needs the API: the size arrives as Content-Length during download,
    * which is all the progress bar needs.
    */
-  private assetUrls(version: string): { assetName: string; downloadUrl: string; checksumUrl: string } | null {
+  private assetUrls(version: string): {
+    assetName: string
+    downloadUrl: string
+    checksumUrl: string
+    mirrored: boolean
+  } | null {
     const tokens = platformTokens()
     if (!tokens) return null
     const assetName = `ipatool-${version}-${tokens.os}-${tokens.arch}.tar.gz`
     const base = `${REPO_WEB}/releases/download/v${version}/${assetName}`
     const mirror = settingsStore.getInternal().githubMirror.trim()
+    const downloadUrl = applyMirror(base, mirror)
     return {
       assetName,
-      downloadUrl: applyMirror(base, mirror),
-      checksumUrl: applyMirror(`${base}.sha256sum`, mirror)
+      // The download may be mirrored for performance ...
+      downloadUrl,
+      // ... but the checksum MUST come from the canonical GitHub source.
+      // Mirroring both would let a malicious mirror serve a tampered binary
+      // together with a matching .sha256sum, voiding supply-chain verification.
+      checksumUrl: `${base}.sha256sum`,
+      mirrored: downloadUrl !== base
     }
   }
 
@@ -411,7 +472,10 @@ export class EngineManager extends EventEmitter {
   private async extractBinary(archive: Uint8Array, tag: string): Promise<string> {
     let entries
     try {
-      entries = parseTar(gunzipSync(archive))
+      // Async gunzip: a synchronous 20 MB inflate blocks the main process for
+      // tens of milliseconds, freezing every IPC handler and the UI with it.
+      const raw = await gunzipAsync(Buffer.from(archive))
+      entries = parseTar(raw)
     } catch (error) {
       throw new EngineError(`Could not read the release archive: ${(error as Error).message}`, 'extract-failed')
     }
@@ -496,7 +560,7 @@ export class EngineManager extends EventEmitter {
       managedDir: managedDir(),
       userData: app.getPath('userData'),
       platform: `${process.platform}/${process.arch}`,
-      asset: assetNameFor('VERSION') ?? 'unsupported'
+      asset: assetNameFor('<version>') ?? 'unsupported'
     }
   }
 }

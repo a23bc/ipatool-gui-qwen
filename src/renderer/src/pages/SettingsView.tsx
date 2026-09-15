@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { EngineRelease, LocaleMode, PassphraseMode, Platform, ThemeMode } from '@shared/types'
+import type { EngineRelease, EngineStatus, LocaleMode, PassphraseMode, Platform, ThemeMode } from '@shared/types'
 import type { Key } from '@renderer/i18n'
 import { useAppStore, engineReady } from '@renderer/store/app'
+import { useArtworkStore } from '@renderer/store/artwork'
 import { useUiStore } from '@renderer/store/ui'
 import { Icon, Spinner } from '@renderer/components/Icon'
 import { PlatformSelect } from '@renderer/components/Badges'
 import { Choice, Field, NumberInput, Section, TextInput, Toggle } from '@renderer/components/SettingsControls'
 
-const SOURCE_KEY: Record<string, Key> = {
+// Keyed by the exact source union so lookups stay total (no `| undefined`).
+const SOURCE_KEY: Record<NonNullable<EngineStatus['source']>, Key> = {
   settings: 'settings.engine.source.settings',
   env: 'settings.engine.source.env',
   path: 'settings.engine.source.path',
@@ -56,18 +58,35 @@ export function SettingsView(): ReactNode {
 
   const redetect = async (): Promise<void> => {
     setDetecting(true)
-    const status = await detect(true)
-    setDetecting(false)
-    toast(
-      engineReady(status)
-        ? { kind: 'success', message: `${status.path}` }
-        : { kind: 'warn', message: status.message ?? t('engine.pill.missing') }
-    )
+    try {
+      const status = await detect(true)
+      toast(
+        engineReady(status)
+          ? { kind: 'success', message: `${status.path}` }
+          : { kind: 'warn', message: status.message ?? t('engine.pill.missing') }
+      )
+    } catch (error) {
+      toast({ kind: 'error', message: t('engine.pill.missing'), detail: String(error) })
+    } finally {
+      // Always re-enable the button: an IPC rejection used to leave it stuck
+      // in the disabled "detecting" state forever.
+      setDetecting(false)
+    }
   }
 
   const checkUpdate = async (): Promise<void> => {
     setUpdateState('checking')
-    const result = await window.api.checkAppUpdate()
+    let result
+    try {
+      result = await window.api.checkAppUpdate()
+    } catch (error) {
+      // Without this the button stayed disabled in the "checking" state and
+      // the rejection surfaced as an unhandled promise rejection.
+      setUpdateState('done')
+      setUpdateInfo(null)
+      toast({ kind: 'error', message: t('settings.about.updateFailed'), detail: String(error) })
+      return
+    }
     setUpdateState('done')
     if (result.error === 'update-check-not-configured') {
       setUpdateInfo(null)
@@ -92,8 +111,15 @@ export function SettingsView(): ReactNode {
   }
 
   const clearArtwork = async (): Promise<void> => {
-    const removed = await window.api.clearArtworkCache()
-    toast({ kind: 'success', message: t('settings.downloads.artworkCleared', { n: removed }) })
+    try {
+      const removed = await window.api.clearArtworkCache()
+      // The main-process cache is gone; drop the renderer's data-URL mirror
+      // too, or rows keep showing stale artwork until the next restart.
+      useArtworkStore.getState().invalidateAll()
+      toast({ kind: 'success', message: t('settings.downloads.artworkCleared', { n: removed }) })
+    } catch (error) {
+      toast({ kind: 'error', message: String(error) })
+    }
   }
 
   const doReset = async (): Promise<void> => {
@@ -104,8 +130,12 @@ export function SettingsView(): ReactNode {
       danger: true
     })
     if (!confirmed) return
-    await reset()
-    toast({ kind: 'success', message: t('toast.settingsReset') })
+    try {
+      await reset()
+      toast({ kind: 'success', message: t('toast.settingsReset') })
+    } catch (error) {
+      toast({ kind: 'error', message: String(error) })
+    }
   }
 
   return (
@@ -194,13 +224,17 @@ export function SettingsView(): ReactNode {
                 disabled={engine.state === 'downloading'}
                 title={t('settings.engine.installHelp')}
                 onClick={() => {
-                  void install(settings.engineVersion).then((status) => {
-                    toast(
-                      engineReady(status)
-                        ? { kind: 'success', message: t('toast.engineInstalled', { version: status.version ?? '' }) }
-                        : { kind: 'error', message: t('toast.engineFailed'), detail: status.message ?? undefined }
-                    )
-                  })
+                  install(settings.engineVersion)
+                    .then((status) => {
+                      toast(
+                        engineReady(status)
+                          ? { kind: 'success', message: t('toast.engineInstalled', { version: status.version ?? '' }) }
+                          : { kind: 'error', message: t('toast.engineFailed'), detail: status.message ?? undefined }
+                      )
+                    })
+                    .catch((error: unknown) => {
+                      toast({ kind: 'error', message: t('toast.engineFailed'), detail: String(error) })
+                    })
                 }}
               >
                 {engine.state === 'downloading' ? <Spinner size={13} /> : <Icon name="download" size={13} />}
@@ -457,7 +491,11 @@ export function SettingsView(): ReactNode {
               <button
                 type="button"
                 className="btn h-[28px]"
-                onClick={() => void window.api.openPath(appInfo?.paths.userData ?? '')}
+                onClick={() => {
+                  window.api.openPath(appInfo?.paths.userData ?? '').catch((error: unknown) => {
+                    toast({ kind: 'error', message: String(error) })
+                  })
+                }}
               >
                 <Icon name="folder" size={13} />
                 {t('settings.advanced.openUserData')}

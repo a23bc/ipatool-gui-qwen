@@ -51,7 +51,7 @@ export interface SwitchResult {
 }
 
 /** Channel names for `ipcRenderer.invoke` (request/response). */
-export const IPC = {
+export const IPC = Object.freeze({
   AppInfo: 'app:info',
 
   SettingsGet: 'settings:get',
@@ -117,7 +117,10 @@ export const IPC = {
   WindowMinimize: 'window:minimize',
   WindowToggleMaximize: 'window:toggle-maximize',
   WindowClose: 'window:close'
-} as const
+  // Frozen at runtime too, not just `as const` at compile time: every process
+  // shares this live object, so a compromised renderer must not be able to
+  // re-point an innocuous channel name at a sensitive handler.
+} as const)
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
 

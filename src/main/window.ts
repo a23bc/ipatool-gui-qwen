@@ -8,7 +8,8 @@
  */
 
 import path from 'node:path'
-import { BrowserWindow, nativeTheme, shell } from 'electron'
+import { pathToFileURL } from 'node:url'
+import { app, BrowserWindow, nativeTheme, shell } from 'electron'
 import { APP_PRODUCT } from './update'
 
 const DEV_URL = process.env.IPATOOL_GUI_DEV_URL
@@ -63,7 +64,10 @@ export function createMainWindow(options: WindowOptions = {}): BrowserWindow {
       // the progress bar stutter when the user switches apps.
       backgroundThrottling: false,
       spellcheck: false,
-      devTools: true
+      // DevTools in a packaged build exposes window.api, the stores and the
+      // settings snapshot to anyone who can reach the keyboard; keep them a
+      // development-only affordance.
+      devTools: !app.isPackaged
     },
     ...titleBarOptions()
   })
@@ -76,7 +80,11 @@ export function createMainWindow(options: WindowOptions = {}): BrowserWindow {
   })
 
   win.webContents.on('will-navigate', (event, url) => {
-    const allowed = DEV_URL ? url.startsWith(DEV_URL) : url.startsWith('file://')
+    // Production: only the app's own renderer entry may ever be navigated to.
+    // A blanket `file://` allow-list would let an XSS pivot the window onto
+    // arbitrary local files (phishing surface, reader of sensitive paths).
+    const rendererEntry = pathToFileURL(path.join(__dirname, '../renderer/index.html')).href
+    const allowed = DEV_URL ? url.startsWith(DEV_URL) : url === rendererEntry
     if (!allowed) {
       event.preventDefault()
       if (/^https?:\/\//i.test(url)) void shell.openExternal(url)

@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import { ENGINE_ERROR_CODES } from '@shared/types'
+import { IPATOOL_ERROR_CODES } from '@shared/ipatool/errors'
 import { useAppStore } from '@renderer/store/app'
 import { useUiStore } from '@renderer/store/ui'
 import type { Key } from '@renderer/i18n'
@@ -32,8 +34,16 @@ export function ErrorNotice({
   const t = useAppStore((state) => state.t)
   const setView = useUiStore((state) => state.setView)
 
-  const titleKey = hint ? `${hintNamespace}.${hint}` : null
-  const hintText = hint ? `${hintNamespace}.${hint}.hint` : null
+  // `hint` arrives from IPC as an untyped string: validate it against the
+  // known code union before turning it into an i18n key, so an unexpected
+  // code degrades to the generic title instead of leaking a raw
+  // "errors.<junk>.hint" literal into the UI.
+  const knownCodes: readonly string[] =
+    hintNamespace === 'errors' ? IPATOOL_ERROR_CODES : ENGINE_ERROR_CODES
+  const validHint = hint && knownCodes.includes(hint) ? hint : null
+
+  const titleKey = validHint ? `${hintNamespace}.${validHint}` : null
+  const hintText = validHint ? `${hintNamespace}.${validHint}.hint` : null
   const title = titleKey ? t(titleKey as Key) : t('error.title')
   const advice = hintText ? t(hintText as Key) : null
 
