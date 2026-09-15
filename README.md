@@ -111,15 +111,19 @@ downloading  21% [======>       ] (12/45 MB, 1.2 MB/s)
 - **macOS**：首次打开请右键 → 打开（或 `xattr -d com.apple.quarantine`）；
 - **Windows**：接受 SmartScreen 提示即可。
 
-> **两个常见误区：**
+> **触发模型（默认不发布任何东西）：**
 >
-> 1. `git push origin main` **不会推送标签**，Release 工作流因此不会触发。
->    必须显式执行 `git push origin v1.0.2`（或 `git push origin --tags`）。
->    只推分支时运行的 `ci.yml` 仅做验证、不产安装包——它的 summary 里也写明了这一点。
-> 2. 不想打标签也可以：**Actions → Release → Run workflow** 手动触发，
->    构建产物在该次运行页的 *Artifacts* 里下载（此路径不创建 GitHub Release）。
-> 3. 标签推送产生的 GitHub Release 是 **Draft**，只有仓库协作者可见；
->    在 Releases 页面确认无误后手动 Publish 才会公开。
+> | 动作 | 结果 |
+> | --- | --- |
+> | 推送分支 | 仅 `ci.yml` 验证，无产物 |
+> | 推送 `v*` 标签 | 三平台构建，安装包作为**该次运行的 Artifacts**；不创建 Release |
+> | Actions → Release → Run workflow | 同上；勾选 `publish` 才会额外创建 **Draft** Release |
+>
+> Draft 不是公开状态，仍需到 Releases 页手动点 Publish 才对外可见。
+> 地下开发阶段只要不勾 `publish`，仓库对外不会留下任何 Release 痕迹。
+>
+> 另外注意：`git push origin main` **不会推送标签**；需要标签时必须
+> `git push origin v1.0.3`（或 `--tags`）。
 
 ### 方式二：本地开发
 

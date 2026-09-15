@@ -25,7 +25,8 @@ const production = !watch
 const pkg = JSON.parse(await readFile(path.join(projectRoot, 'package.json'), 'utf8'))
 const defines = {
   'process.env.NODE_ENV': production ? '"production"' : '"development"',
-  __APP_VERSION__: JSON.stringify(process.env.APP_VERSION ?? pkg.version ?? '0.0.0'),
+  // Empty string means "unset" (CI passes '' for non-tag runs), so use || not ??.
+  __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || pkg.version || '0.0.0'),
   __APP_REPO__: JSON.stringify(process.env.APP_REPO ?? ''),
   __APP_PRODUCT__: JSON.stringify(pkg.productName ?? pkg.name ?? 'IPATool GUI')
 }

@@ -1,12 +1,24 @@
 name: Release
 
+# Stealth-friendly trigger model.
+#
+# Nothing is ever published by accident:
+#   - pushing a branch  -> ci.yml only (verify, no artifacts)
+#   - pushing a v* tag  -> this workflow builds all platforms and uploads the
+#                          installers as *run artifacts*; no GitHub Release
+#   - manual dispatch   -> same as a tag push, plus an opt-in checkbox to also
+#                          create a DRAFT release (drafts are not public; they
+#                          still need an explicit Publish click to go live)
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Also create a draft GitHub Release (stays unpublished until you click Publish)'
+        type: boolean
+        default: false
 
-# The release job uploads installers; the publish job attaches them to a GitHub
-# release only after every platform succeeded, so a release never ships half-built.
 permissions:
   contents: write
 
@@ -19,13 +31,10 @@ jobs:
         include:
           - os: windows-latest
             platform: win
-            ext: 'exe'
           - os: macos-14
             platform: mac
-            ext: 'dmg'
           - os: ubuntu-22.04
             platform: linux
-            ext: 'AppImage'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -47,12 +56,38 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             fakeroot dpkg rpm libarchive-tools
 
-      - name: Build
+      # Packaging consumes dist/, so it must exist before electron-builder runs.
+      # (This step was once missing and produced a confusing
+      # "entry file was not found in this archive" failure.)
+      - name: Build app bundle
+        run: npm run build
+        env:
+          APP_REPO: ${{ github.repository }}
+          # Only tags carry a meaningful version; otherwise fall back to the
+          # version in package.json (build-main.mjs treats "" as unset).
+          APP_VERSION: "${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}"
+
+      # Fail fast with an obvious message instead of an asar sanity-check error.
+      - name: Verify bundle before packaging
+        run: |
+          node -e '
+            const fs = require("fs");
+            const required = [
+              "dist/main/index.js",
+              "dist/preload/index.js",
+              "dist/renderer/index.html"
+            ];
+            const missing = required.filter((f) => !fs.existsSync(f));
+            if (missing.length > 0) {
+              console.error("::error::bundle incomplete, missing: " + missing.join(", "));
+              process.exit(1);
+            }
+            console.log("bundle ok: " + required.join(", "));
+          '
+
+      - name: Build installers
         run: npx electron-builder --${{ matrix.platform }} --publish never
         env:
-          # Lets "check for updates" point at this repository in the shipped app.
-          APP_REPO: ${{ github.repository }}
-          APP_VERSION: ${{ github.ref_name }}
           # Builds are unsigned by design; make that explicit so a missing
           # certificate never silently changes the output.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -60,8 +95,7 @@ jobs:
       - name: List artifacts
         run: ls -lh release/
 
-      # Makes it obvious from the run page what was produced and where it goes,
-      # so "no artifacts" is never a mystery again.
+      # Makes it obvious from the run page what was produced and where it goes.
       - name: Add artifact list to job summary
         run: |
           {
@@ -69,8 +103,8 @@ jobs:
             echo
             ls -lh release/ | awk 'NR>1 && $9 != "" {print "- `" $9 "` (" $5 ")"}'
             echo
-            echo "Uploaded as **run artifacts** below. A GitHub Release attaching them is"
-            echo "created by the *publish* job, which runs only for pushed \`v*\` tags."
+            echo "Download these from **Artifacts** on this run. Nothing is published"
+            echo "unless the *publish* job runs (opt-in checkbox on manual dispatch)."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
@@ -82,31 +116,35 @@ jobs:
             release/*.zip
             release/*.AppImage
             release/*.deb
-            release/*.yml
           if-no-files-found: error
           retention-days: 30
 
   publish:
-    name: Publish release
+    name: Create draft release (opt-in)
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Explicit opt-in only. A tag push produces artifacts but no release.
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true'
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Create GitHub release
+      - name: Create DRAFT GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "IPATool GUI ${GITHUB_REF_NAME}" \
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" != v* ]]; then TAG="v$(date +%Y.%m.%d)-${GITHUB_RUN_ID}"; fi
+          gh release create "$TAG" \
+            --title "IPATool GUI ${TAG}" \
             --draft \
             --notes "Installers for Windows (NSIS + portable), macOS (dmg, unsigned) and Linux (AppImage, deb).
 
           Builds are **unsigned**: on macOS right-click → Open the first time; on Windows accept the SmartScreen prompt.
 
-          The app itself downloads and verifies [ipatool](https://github.com/majd/ipatool) on first launch - it is not bundled." \
+          The app itself downloads and verifies [ipatool](https://github.com/majd/ipatool) on first launch - it is not bundled.
+
+          This release was created as a **draft** and is not public." \
             artifacts/*
