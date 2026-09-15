@@ -131,7 +131,9 @@ export const useVersionsStore = create<VersionsState>()((set, get) => ({
       return
     }
 
-    set({ loading: false, ids: result.data.externalVersionIdentifiers })
+    // Upstream returns oldest-first; the UI wants newest-first, and the first
+    // entry after reversal is the latest version.
+    set({ loading: false, ids: [...result.data.externalVersionIdentifiers].reverse() })
   },
 
   enqueueVisible(ids) {

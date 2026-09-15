@@ -25,7 +25,7 @@ export interface ProfilesState {
   remove: (id: string) => Promise<void>
   setActive: (id: string) => Promise<void>
   refreshInfo: (id: string) => Promise<void>
-  storePassword: (id: string, password: string) => Promise<void>
+  storePassword: (id: string, password: string, email: string) => Promise<void>
   forgetPassword: (id: string) => Promise<void>
 }
 
@@ -108,8 +108,8 @@ export const useProfilesStore = create<ProfilesState>()((set) => ({
     }
   },
 
-  async storePassword(id, password) {
-    const profiles = asProfileViews(await window.api.setProfilePassword(id, password))
+  async storePassword(id, password, email) {
+    const profiles = asProfileViews(await window.api.setProfilePassword(id, password, email))
     set({ profiles })
   },
 

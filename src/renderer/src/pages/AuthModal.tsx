@@ -92,7 +92,11 @@ export function AuthModal(): ReactNode {
       // possible on platforms whose keyring is a single machine-wide slot.
       const target = profile?.id
       if (target) {
-        if (rememberPassword) await useProfilesStore.getState().storePassword(target, password)
+        if (rememberPassword) {
+          await useProfilesStore
+            .getState()
+            .storePassword(target, password, result.account?.email ?? email.trim())
+        }
         else await useProfilesStore.getState().forgetPassword(target)
       }
       useAppStore.getState().setAccount(result.account)

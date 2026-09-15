@@ -198,7 +198,8 @@ export function VersionsDrawer(): ReactNode {
           </div>
         ) : null}
 
-        <div className="min-h-0 flex-1">
+        {/* Must be a flex container: VirtualList sizes itself with flex-1. */}
+        <div className="flex min-h-0 flex-1 flex-col">
           {loading ? (
             <div className="flex flex-col gap-2 px-4 py-3">
               {Array.from({ length: 8 }, (_, index) => (

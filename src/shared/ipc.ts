@@ -213,7 +213,7 @@ export interface RendererApi {
   setActiveProfile(id: string): Promise<SwitchResult>
   refreshProfileInfo(id: string): Promise<{ profiles: ProfileView[]; account: AccountInfo | null }>
   setProfileStateDir(id: string, dir: string): Promise<ProfileView[]>
-  setProfilePassword(id: string, password: string): Promise<ProfileView[]>
+  setProfilePassword(id: string, password: string, email: string): Promise<ProfileView[]>
   forgetProfilePassword(id: string): Promise<ProfileView[]>
 
   login(email: string, password: string, authCode?: string, profileId?: string): Promise<LoginResult>

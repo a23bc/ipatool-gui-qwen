@@ -152,8 +152,8 @@ export function registerIpc(): void {
     return profileViews()
   })
 
-  ipcMain.handle(IPC.ProfilesSetPassword, async (_e, id: string, password: string) => {
-    await credentials.set(String(id), String(password ?? ''))
+  ipcMain.handle(IPC.ProfilesSetPassword, async (_e, id: string, password: string, email: string) => {
+    await credentials.set(String(id), String(password ?? ''), String(email ?? ''))
     return profileViews()
   })
 
@@ -198,9 +198,21 @@ export function registerIpc(): void {
     // On macOS / keyring-backed Linux the OS keychain holds a single machine-wide
     // session, so "switching" must re-authenticate the target account. With a
     // stored password this is silent; otherwise the user signs in manually.
-    const password = await credentials.get(target.id)
-    if (password && target.email) {
-      const result = await ipatoolApi.login(target.email, password, undefined, target.id)
+    const credential = await credentials.get(target.id)
+    // Only auto-login when the stored pair actually belongs to this profile.
+    // A password captured for another Apple ID must never be replayed here:
+    // doing so would write that account's session into this profile's
+    // directory, which is exactly the "switching back overwrote it" report.
+    const storedMatches =
+      credential !== null &&
+      (!target.email || !credential.email || credential.email === target.email.trim().toLowerCase())
+    if (credential && storedMatches) {
+      const result = await ipatoolApi.login(
+        credential.email || target.email,
+        credential.password,
+        undefined,
+        target.id
+      )
       if (result.status === 'ok' && result.account) {
         setAccount(result.account)
         return { profiles: await profileViews(), account: result.account, needs2fa: false }

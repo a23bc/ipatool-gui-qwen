@@ -77,8 +77,8 @@ const api: RendererApi = {
   renameProfile: (id: string, name: string): Promise<ProfileView[]> =>
     ipcRenderer.invoke(IPC.ProfilesRename, id, name),
   setActiveProfile: (id: string): Promise<SwitchResult> => ipcRenderer.invoke(IPC.ProfilesSetActive, id),
-  setProfilePassword: (id: string, password: string): Promise<ProfileView[]> =>
-    ipcRenderer.invoke(IPC.ProfilesSetPassword, id, password),
+  setProfilePassword: (id: string, password: string, email: string): Promise<ProfileView[]> =>
+    ipcRenderer.invoke(IPC.ProfilesSetPassword, id, password, email),
   forgetProfilePassword: (id: string): Promise<ProfileView[]> =>
     ipcRenderer.invoke(IPC.ProfilesForgetPassword, id),
   refreshProfileInfo: (id: string): Promise<{ profiles: ProfileView[]; account: AccountInfo | null }> =>

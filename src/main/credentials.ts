@@ -23,7 +23,13 @@ import { app, safeStorage } from 'electron'
 const FILE_NAME = 'credentials.json'
 const PREFIX = 'enc:v1:'
 
-type Store = Record<string, string>
+export interface StoredCredential {
+  password: string
+  /** The Apple ID this password was captured for. */
+  email: string
+}
+
+type Store = Record<string, StoredCredential>
 
 let cache: Store | null = null
 let file = ''
@@ -51,7 +57,14 @@ async function load(): Promise<Store> {
       if (typeof value !== 'string' || !value.startsWith(PREFIX)) continue
       if (!available()) continue
       try {
-        out[id] = safeStorage.decryptString(Buffer.from(value.slice(PREFIX.length), 'base64'))
+        const plain = safeStorage.decryptString(Buffer.from(value.slice(PREFIX.length), 'base64'))
+        const decoded = JSON.parse(plain) as { password?: string; email?: string }
+        // Legacy entries were bare passwords; accept them without an email.
+        if (typeof decoded.password === 'string') {
+          out[id] = { password: decoded.password, email: typeof decoded.email === 'string' ? decoded.email : '' }
+        } else if (typeof plain === 'string' && plain !== '') {
+          out[id] = { password: plain, email: '' }
+        }
       } catch {
         /* unreadable entry: drop it rather than fail the whole store */
       }
@@ -68,7 +81,7 @@ async function persist(): Promise<void> {
   const encoded: Record<string, string> = {}
   if (available()) {
     for (const [id, value] of Object.entries(store)) {
-      encoded[id] = PREFIX + safeStorage.encryptString(value).toString('base64')
+      encoded[id] = PREFIX + safeStorage.encryptString(JSON.stringify(value)).toString('base64')
     }
   }
   const tmp = `${filePath()}.${process.pid}.tmp`
@@ -76,9 +89,9 @@ async function persist(): Promise<void> {
   await rename(tmp, filePath())
 }
 
-export async function set(profileId: string, password: string): Promise<void> {
+export async function set(profileId: string, password: string, email: string): Promise<void> {
   const store = await load()
-  store[profileId] = password
+  store[profileId] = { password, email: email.trim().toLowerCase() }
   await persist()
 }
 
@@ -88,7 +101,7 @@ export async function clear(profileId: string): Promise<void> {
   await persist()
 }
 
-export async function get(profileId: string): Promise<string | null> {
+export async function get(profileId: string): Promise<StoredCredential | null> {
   const store = await load()
   return store[profileId] ?? null
 }
