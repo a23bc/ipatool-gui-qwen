@@ -206,6 +206,28 @@ export const en = {
   'purchases.purchasedOn': 'Purchased {date}',
   'purchases.paidCount': '{n} paid',
 
+  'accounts.title': 'Accounts',
+  'accounts.subtitle': 'Each account keeps its own ipatool session; switching never logs another one out.',
+  'accounts.add': 'Add account',
+  'accounts.addPlaceholder': 'Label (optional)',
+  'accounts.active': 'Active',
+  'accounts.switch': 'Switch',
+  'accounts.refresh': 'Re-check session',
+  'accounts.rename': 'Rename',
+  'accounts.remove': 'Remove',
+  'accounts.removeConfirmBody': 'Unregister {email} from this app? Its stored session on this machine is deleted. The Apple ID itself is untouched.',
+  'accounts.removeConfirmBodyAnonymous': 'Unregister this account from this app? Its stored session on this machine is deleted.',
+  'accounts.notSignedIn': 'Not signed in',
+  'accounts.stateDirHelp': 'Session directory (XDG_STATE_HOME). Leave empty for an app-managed isolated directory; set a path to share a session with the terminal CLI.',
+  'accounts.stateDirPlaceholder': 'empty = app-managed',
+  'accounts.empty': 'No accounts yet.',
+  'accounts.hint': 'Commands and new downloads run as “{name}”.',
+  'accounts.relogin': 'Re-login this account',
+  'accounts.signInTo': 'Sign in to this account',
+  'accounts.signInto': 'Signing in to: {name}',
+  'accounts.removedDir': 'Account removed; its session data was deleted',
+  'accounts.keptDir': 'Account removed; the custom directory was kept on disk',
+
   /* ---------------- downloads ---------------- */
   'downloads.title': 'Downloads',
   'downloads.empty.title': 'No downloads',
@@ -319,9 +341,8 @@ export const en = {
   'settings.account.passphraseValue': 'Passphrase',
   'settings.account.passphraseWarning':
     'If you already use ipatool in a terminal, use the same passphrase here or the stored credentials cannot be decrypted.',
-  'settings.account.stateDir': 'Credential directory (XDG_STATE_HOME)',
-  'settings.account.stateDirHelp':
-    'Set this to keep the GUI session separate from your terminal ipatool session. Leave empty to share it.',
+  'settings.account.manage': 'Manage accounts',
+  'settings.account.manageHint': 'Add, switch, rename or remove App Store accounts. Each one gets an isolated ipatool session.',
   'settings.account.verbose': 'Verbose ipatool logs',
 
   'settings.downloads.dir': 'Download folder',

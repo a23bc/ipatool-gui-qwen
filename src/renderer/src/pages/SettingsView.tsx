@@ -275,14 +275,18 @@ export function SettingsView(): ReactNode {
             </Field>
           ) : null}
 
-          <Field label={t('settings.account.stateDir')} hint={t('settings.account.stateDirHelp')} stacked>
-            <TextInput
-              value={settings.stateDir}
-              onChange={(value) => void update({ stateDir: value })}
-              placeholder="~/.local/state/ipatool-gui"
-              mono
-              className="w-full"
-            />
+          <Field
+            label={t('settings.account.manage')}
+            hint={t('settings.account.manageHint')}
+          >
+            <button
+              type="button"
+              className="btn h-[28px]"
+              onClick={() => useUiStore.getState().setAccountsOpen(true)}
+            >
+              <Icon name="user" size={13} />
+              {t('accounts.title')}
+            </button>
           </Field>
 
           <Toggle

@@ -69,13 +69,13 @@ function EnginePill(): ReactNode {
 function AccountButton(): ReactNode {
   const account = useAppStore((state) => state.account)
   const t = useAppStore((state) => state.t)
-  const setAuthOpen = useUiStore((state) => state.setAuthOpen)
+  const setAccountsOpen = useUiStore((state) => state.setAccountsOpen)
 
   return (
     <button
       type="button"
       className="no-drag btn btn-ghost h-[26px] gap-1.5 px-2"
-      onClick={() => setAuthOpen(true)}
+      onClick={() => setAccountsOpen(true)}
       title={account ? account.name || account.email : t('auth.signIn')}
     >
       <Icon name="user" size={13} />

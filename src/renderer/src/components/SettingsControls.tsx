@@ -40,6 +40,13 @@ export function Field({ label, hint, children, stacked = false }: FieldProps): R
   )
 }
 
+// Toggle geometry, in pixels. Track 40x22 with an 18px knob and 2px padding
+// leaves exactly 2px of clearance on either side in both states.
+const TRACK_W = 40
+const TRACK_H = 22
+const KNOB = 18
+const KNOB_PAD = 2
+
 export interface ToggleProps {
   checked: boolean
   onChange: (value: boolean) => void
@@ -58,12 +65,26 @@ export function Toggle({ checked, onChange, label, hint, disabled = false }: Tog
         aria-label={label}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className="relative h-[20px] w-[36px] shrink-0 rounded-full transition-colors disabled:opacity-40"
-        style={{ background: checked ? 'var(--accent)' : 'var(--border-strong)' }}
+        className="relative shrink-0 rounded-full transition-colors disabled:opacity-40"
+        style={{
+          width: TRACK_W,
+          height: TRACK_H,
+          background: checked ? 'var(--accent)' : 'var(--border-strong)'
+        }}
       >
+        {/* Explicit left offset + translate, so the knob position never depends
+            on static-position quirks: OFF sits KNOB_PAD from the left edge,
+            ON sits KNOB_PAD from the right edge. */}
         <span
-          className="absolute top-[2px] h-4 w-4 rounded-full bg-white transition-transform"
-          style={{ transform: checked ? 'translateX(18px)' : 'translateX(2px)' }}
+          className="absolute rounded-full bg-white transition-transform"
+          style={{
+            top: KNOB_PAD,
+            left: KNOB_PAD,
+            width: KNOB,
+            height: KNOB,
+            transform: checked ? `translateX(${TRACK_W - KNOB - KNOB_PAD * 2}px)` : 'translateX(0)',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.35)'
+          }}
         />
       </button>
     </Field>

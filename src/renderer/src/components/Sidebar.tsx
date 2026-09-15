@@ -74,7 +74,7 @@ export const Sidebar = memo(function Sidebar(): ReactNode {
   const t = useAppStore((state) => state.t)
   const engine = useAppStore((state) => state.engine)
   const account = useAppStore((state) => state.account)
-  const setAuthOpen = useUiStore((state) => state.setAuthOpen)
+  const setAccountsOpen = useUiStore((state) => state.setAccountsOpen)
   const setView = useUiStore((state) => state.setView)
   const ready = engineReady(engine)
 
@@ -125,7 +125,7 @@ export const Sidebar = memo(function Sidebar(): ReactNode {
         <button
           type="button"
           className="no-drag flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--row-hover)]"
-          onClick={() => setAuthOpen(true)}
+          onClick={() => setAccountsOpen(true)}
         >
           <span style={{ color: account ? 'var(--accent)' : 'var(--text-faint)' }}>
             <Icon name="user" size={14} />

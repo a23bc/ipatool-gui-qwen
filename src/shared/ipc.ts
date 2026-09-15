@@ -31,7 +31,15 @@ import type {
   VersionsResult,
   PurchaseOutcome
 } from './types'
+import type { Profile } from './types'
 import type { AppSelector } from './ipatool/args'
+
+/** A profile plus the derived bits the switcher UI needs. */
+export interface ProfileView extends Profile {
+  active: boolean
+  /** Resolved state directory, shown for transparency. */
+  dir: string
+}
 
 /** Channel names for `ipcRenderer.invoke` (request/response). */
 export const IPC = {
@@ -47,6 +55,14 @@ export const IPC = {
   EngineReleases: 'engine:releases',
   EngineUninstall: 'engine:uninstall',
   AppCheckUpdate: 'app:check-update',
+
+  ProfilesList: 'profiles:list',
+  ProfilesAdd: 'profiles:add',
+  ProfilesRemove: 'profiles:remove',
+  ProfilesRename: 'profiles:rename',
+  ProfilesSetActive: 'profiles:set-active',
+  ProfilesRefreshInfo: 'profiles:refresh-info',
+  ProfilesSetStateDir: 'profiles:set-state-dir',
 
   AuthLogin: 'auth:login',
   AuthAccount: 'auth:account',
@@ -179,9 +195,17 @@ export interface RendererApi {
   checkAppUpdate(): Promise<UpdateCheckResult>
 
   /* --- auth ------------------------------------------------------- */
-  login(email: string, password: string, authCode?: string): Promise<LoginResult>
+  listProfiles(): Promise<ProfileView[]>
+  addProfile(name: string): Promise<ProfileView[]>
+  removeProfile(id: string): Promise<{ profiles: ProfileView[]; removedDir: boolean }>
+  renameProfile(id: string, name: string): Promise<ProfileView[]>
+  setActiveProfile(id: string): Promise<{ profiles: ProfileView[]; account: AccountInfo | null }>
+  refreshProfileInfo(id: string): Promise<{ profiles: ProfileView[]; account: AccountInfo | null }>
+  setProfileStateDir(id: string, dir: string): Promise<ProfileView[]>
+
+  login(email: string, password: string, authCode?: string, profileId?: string): Promise<LoginResult>
   getAccount(): Promise<AccountInfo | null>
-  refreshAccount(): Promise<AccountInfo | null>
+  refreshAccount(profileId?: string): Promise<AccountInfo | null>
   revoke(): Promise<Operation<{ revoked: boolean }>>
 
   /* --- store ------------------------------------------------------ */

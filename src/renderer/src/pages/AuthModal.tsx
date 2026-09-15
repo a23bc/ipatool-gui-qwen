@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LoginStatus } from '@shared/types'
 import { useAppStore } from '@renderer/store/app'
+import { useProfilesStore, activeProfile } from '@renderer/store/profiles'
 import { useUiStore } from '@renderer/store/ui'
 import { ErrorNotice } from '@renderer/components/ErrorNotice'
 import { Icon, Spinner } from '@renderer/components/Icon'
@@ -33,6 +34,10 @@ export function AuthModal(): ReactNode {
   const refreshAccount = useAppStore((state) => state.refreshAccount)
   const revokeAccount = useAppStore((state) => state.revokeAccount)
 
+  const profiles = useProfilesStore((state) => state.profiles)
+  const loadProfiles = useProfilesStore((state) => state.load)
+  const profile = activeProfile(profiles)
+
   const open = useUiStore((state) => state.authOpen)
   const setOpen = useUiStore((state) => state.setAuthOpen)
   const toast = useUiStore((state) => state.toast)
@@ -50,6 +55,7 @@ export function AuthModal(): ReactNode {
   // Reset transient state each time the dialog opens.
   useEffect(() => {
     if (!open) return
+    void loadProfiles()
     setStep('credentials')
     setPassword('')
     setCode('')
@@ -176,6 +182,16 @@ export function AuthModal(): ReactNode {
         >
           {step === 'credentials' ? (
             <>
+              {profile ? (
+                <p
+                  className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11.5px]"
+                  style={{ background: 'var(--panel-2)', color: 'var(--text-dim)' }}
+                >
+                  <Icon name="user" size={12} />
+                  {t('accounts.signInto', { name: profile.name })}
+                </p>
+              ) : null}
+
               <label className="flex flex-col gap-1.5">
                 <span className="text-[11.5px] font-medium dim">{t('auth.email')}</span>
                 <input

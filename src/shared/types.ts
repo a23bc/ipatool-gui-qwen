@@ -165,6 +165,8 @@ export interface QueueProgress {
 
 export interface QueueItem {
   id: string
+  /** Account this download belongs to; survives account switches. */
+  profileId: string
   appId: number
   bundleID: string
   name: string
@@ -214,6 +216,23 @@ export type ThemeMode = 'system' | 'light' | 'dark'
 export type LocaleMode = 'system' | 'zh-CN' | 'en-US'
 export type PassphraseMode = 'auto' | 'manual' | 'none'
 
+/**
+ * One App Store account.
+ *
+ * Backed by an isolated ipatool state directory (see main/profiles.ts), which is
+ * how several sessions coexist without ever logging each other out.
+ */
+export interface Profile {
+  id: string
+  name: string
+  /** Resolved Apple ID e-mail, once known. */
+  email: string
+  /** '' = ipatool's default location (shared with the terminal CLI). */
+  stateDir: string
+  createdAt: number
+  lastUsedAt: number
+}
+
 export interface Settings {
   /** Manual override for the ipatool binary location. */
   ipatoolPath: string
@@ -232,8 +251,9 @@ export interface Settings {
   passphraseMode: PassphraseMode
   /** Only meaningful when passphraseMode === 'manual'; encrypted at rest. */
   keychainPassphrase: string
-  /** XDG_STATE_HOME override used to isolate GUI credentials from the CLI. */
-  stateDir: string
+  /** App Store accounts; each maps to an isolated ipatool state directory. */
+  profiles: Profile[]
+  activeProfileId: string
   verbose: boolean
   theme: ThemeMode
   locale: LocaleMode

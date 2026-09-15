@@ -13,6 +13,14 @@ export interface VirtualListProps<T> {
   /** Fired when the user scrolls near the end (infinite loading). */
   onNearEnd?: () => void
   empty?: ReactNode
+  /**
+   * Measure real row heights instead of assuming `rowHeight`.
+   *
+   * Required whenever a row's content wraps to a variable number of lines (log
+   * output): a fixed height would clip everything past the first line, which is
+   * exactly the "output looks incomplete" symptom.
+   */
+  dynamic?: boolean
 }
 
 /**
@@ -30,7 +38,8 @@ export function VirtualList<T>({
   overscan = 8,
   className = '',
   onNearEnd,
-  empty
+  empty,
+  dynamic = false
 }: VirtualListProps<T>): ReactNode {
   const scrollRef = useRef<HTMLDivElement>(null)
   const nearEndFired = useRef(false)
@@ -85,12 +94,15 @@ export function VirtualList<T>({
             <div
               key={virtualRow.key}
               data-index={virtualRow.index}
+              // Lets the virtualizer read the rendered height for `dynamic`.
+              ref={dynamic ? virtualizer.measureElement : undefined}
               style={{
                 position: 'absolute',
                 top: 0,
                 left: 0,
                 width: '100%',
-                height: rowHeight,
+                // Fixed height only in fixed mode; dynamic rows size themselves.
+                ...(dynamic ? {} : { height: rowHeight }),
                 transform: `translateY(${virtualRow.start}px)`,
                 contain: 'layout style paint'
               }}

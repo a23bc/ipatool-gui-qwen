@@ -11,6 +11,7 @@ import { BrowserWindow, clipboard, dialog, ipcMain, shell, nativeTheme, app, Not
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type {
+  AccountInfo,
   AppInfoPayload,
   DownloadRequest,
   EngineStatus,
@@ -19,6 +20,7 @@ import type {
   QueueItem,
   Settings
 } from '../shared/types'
+import type { ProfileView } from '../shared/ipc'
 import { IPC } from '../shared/ipc'
 import { quoteCommand } from '../shared/format'
 import { redactArgs } from '../shared/redact'
@@ -27,6 +29,7 @@ import { ApiError, ipatoolApi } from './api'
 import { artworkCache } from './artwork'
 import { downloadQueue } from './queue'
 import { engineManager, EngineError } from './engine'
+import * as profiles from './profiles'
 import { settingsStore } from './settings'
 import { taskRegistry } from './tasks'
 import { APP_PRODUCT, APP_VERSION, checkAppUpdate } from './update'
@@ -133,20 +136,74 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.AppCheckUpdate, () => checkAppUpdate())
 
   /* ---------------------------------------------------------------- *
+   * profiles (multi-account)
+   * ---------------------------------------------------------------- */
+
+  ipcMain.handle(IPC.ProfilesList, () => profileViews())
+
+  ipcMain.handle(IPC.ProfilesAdd, (_e, name: string) => {
+    profiles.add(String(name ?? ''))
+    return profileViews()
+  })
+
+  ipcMain.handle(IPC.ProfilesRename, (_e, id: string, name: string) => {
+    profiles.rename(String(id), String(name ?? ''))
+    return profileViews()
+  })
+
+  ipcMain.handle(IPC.ProfilesSetStateDir, (_e, id: string, dir: string) => {
+    const profile = profiles.get(String(id))
+    if (!profile) return profileViews()
+    // Direct mutation through the settings store keeps one persistence path.
+    const next = profiles.list().map((p) => (p.id === id ? { ...p, stateDir: String(dir ?? '') } : p))
+    settingsStore.override({ ...settingsStore.getInternal(), profiles: next })
+    void settingsStore.persistNow()
+    settingsStore.emitChange()
+    return profileViews()
+  })
+
+  ipcMain.handle(IPC.ProfilesRemove, async (_e, id: string) => {
+    const result = await profiles.remove(String(id))
+    cachedAccount = null
+    void refreshActiveAccount()
+    return { profiles: profileViews(), removedDir: result.removedDir }
+  })
+
+  ipcMain.handle(IPC.ProfilesSetActive, async (_e, id: string) => {
+    profiles.setActive(String(id))
+    const account = await refreshActiveAccount()
+    return { profiles: profileViews(), account }
+  })
+
+  ipcMain.handle(IPC.ProfilesRefreshInfo, async (_e, id: string) => {
+    const account = await ipatoolApi.accountInfoOrNull(String(id)).catch(() => null)
+    return { profiles: profileViews(), account }
+  })
+
+  /* ---------------------------------------------------------------- *
    * auth
    * ---------------------------------------------------------------- */
 
-  ipcMain.handle(IPC.AuthLogin, async (_e, email: string, password: string, authCode?: string) => {
-    const result = await ipatoolApi.login(String(email ?? ''), String(password ?? ''), authCode)
-    if (result.status === 'ok' && result.account) setAccount(result.account)
-    return result
-  })
+  ipcMain.handle(
+    IPC.AuthLogin,
+    async (_e, email: string, password: string, authCode?: string, profileId?: string) => {
+      const result = await ipatoolApi.login(
+        String(email ?? ''),
+        String(password ?? ''),
+        authCode,
+        profileId
+      )
+      const isActive = !profileId || profileId === profiles.active().id
+      if (result.status === 'ok' && result.account && isActive) setAccount(result.account)
+      return result
+    }
+  )
 
   ipcMain.handle(IPC.AuthAccount, () => cachedAccount)
 
-  ipcMain.handle(IPC.AuthRefresh, async () => {
-    const account = await ipatoolApi.accountInfoOrNull()
-    setAccount(account)
+  ipcMain.handle(IPC.AuthRefresh, async (_e, profileId?: string) => {
+    const account = await ipatoolApi.accountInfoOrNull(profileId).catch(() => null)
+    if (!profileId || profileId === profiles.active().id) setAccount(account)
     return account
   })
 
@@ -375,6 +432,23 @@ export function applySettings(settings: Settings): void {
   syncTitleBarOverlay(mainWindow())
   taskRegistry.setLineCap(settings.maxLogLines)
   broadcast('settings:changed', settings)
+}
+
+/** Profiles annotated with active flag and resolved directory. */
+function profileViews(): ProfileView[] {
+  const activeId = profiles.active().id
+  return profiles.list().map((profile) => ({
+    ...profile,
+    active: profile.id === activeId,
+    dir: profiles.dirFor(profile)
+  }))
+}
+
+/** Re-reads the active profile's session and broadcasts it. */
+async function refreshActiveAccount(): Promise<AccountInfo | null> {
+  const account = await ipatoolApi.accountInfoOrNull().catch(() => null)
+  setAccount(account)
+  return account
 }
 
 /** Emits task/queue events to the renderer and raises OS notifications. */

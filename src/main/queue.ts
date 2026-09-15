@@ -28,6 +28,7 @@ import { MovingAverage } from '../shared/format'
 import { mergeProgress, type ProgressSample } from '../shared/ipatool/parse'
 import { classifyError, shorten } from '../shared/ipatool/errors'
 import { ApiError, ipatoolApi } from './api'
+import * as profiles from './profiles'
 import { settingsStore } from './settings'
 import { taskRegistry } from './tasks'
 
@@ -104,6 +105,7 @@ export class DownloadQueue extends EventEmitter {
     const progress = raw.progress
     return {
       id: raw.id,
+      profileId: typeof raw.profileId === 'string' ? raw.profileId : '',
       appId: Number(raw.appId ?? 0),
       bundleID: String(raw.bundleID ?? ''),
       name: String(raw.name ?? raw.bundleID ?? raw.id),
@@ -208,6 +210,9 @@ export class DownloadQueue extends EventEmitter {
       const id = `d${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
       this.items.push({
         id,
+        // Remember the account: resuming under a different session would fail
+        // (or worse, purchase under the wrong Apple ID).
+        profileId: profiles.active().id,
         appId,
         bundleID,
         name: request.name?.trim() || bundleID || `App ${appId}`,
@@ -470,6 +475,7 @@ export class DownloadQueue extends EventEmitter {
     try {
       const outcome = await ipatoolApi.download(
         {
+          profileId: item.profileId || undefined,
           selector: {
             ...(item.appId ? { appId: item.appId } : {}),
             ...(item.bundleID ? { bundleID: item.bundleID } : {})

@@ -53,6 +53,9 @@ export interface UiState {
   authOpen: boolean
   setAuthOpen: (open: boolean) => void
 
+  accountsOpen: boolean
+  setAccountsOpen: (open: boolean) => void
+
   /** App whose version history drawer is open, if any. */
   versionsFor: StoreApp | null
   setVersionsFor: (app: StoreApp | null) => void
@@ -82,6 +85,9 @@ export const useUiStore = create<UiState>()((set, get) => ({
 
   authOpen: false,
   setAuthOpen: (authOpen) => set({ authOpen }),
+
+  accountsOpen: false,
+  setAccountsOpen: (accountsOpen) => set({ accountsOpen }),
 
   versionsFor: null,
   setVersionsFor: (versionsFor) => set({ versionsFor }),

@@ -14,6 +14,7 @@ import {
   type EventChannel,
   type EventPayloadMap,
   type FileFilter,
+  type ProfileView,
   type RendererApi
 } from '../shared/ipc'
 import type {
@@ -68,10 +69,24 @@ const api: RendererApi = {
   uninstallEngine: (): Promise<EngineStatus> => ipcRenderer.invoke(IPC.EngineUninstall),
   checkAppUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(IPC.AppCheckUpdate),
 
-  login: (email: string, password: string, authCode?: string): Promise<LoginResult> =>
-    ipcRenderer.invoke(IPC.AuthLogin, email, password, authCode),
+  listProfiles: (): Promise<ProfileView[]> => ipcRenderer.invoke(IPC.ProfilesList),
+  addProfile: (name: string): Promise<ProfileView[]> => ipcRenderer.invoke(IPC.ProfilesAdd, name),
+  removeProfile: (id: string): Promise<{ profiles: ProfileView[]; removedDir: boolean }> =>
+    ipcRenderer.invoke(IPC.ProfilesRemove, id),
+  renameProfile: (id: string, name: string): Promise<ProfileView[]> =>
+    ipcRenderer.invoke(IPC.ProfilesRename, id, name),
+  setActiveProfile: (id: string): Promise<{ profiles: ProfileView[]; account: AccountInfo | null }> =>
+    ipcRenderer.invoke(IPC.ProfilesSetActive, id),
+  refreshProfileInfo: (id: string): Promise<{ profiles: ProfileView[]; account: AccountInfo | null }> =>
+    ipcRenderer.invoke(IPC.ProfilesRefreshInfo, id),
+  setProfileStateDir: (id: string, dir: string): Promise<ProfileView[]> =>
+    ipcRenderer.invoke(IPC.ProfilesSetStateDir, id, dir),
+
+  login: (email: string, password: string, authCode?: string, profileId?: string): Promise<LoginResult> =>
+    ipcRenderer.invoke(IPC.AuthLogin, email, password, authCode, profileId),
   getAccount: (): Promise<AccountInfo | null> => ipcRenderer.invoke(IPC.AuthAccount),
-  refreshAccount: (): Promise<AccountInfo | null> => ipcRenderer.invoke(IPC.AuthRefresh),
+  refreshAccount: (profileId?: string): Promise<AccountInfo | null> =>
+    ipcRenderer.invoke(IPC.AuthRefresh, profileId),
   revoke: (): Promise<Operation<{ revoked: boolean }>> => ipcRenderer.invoke(IPC.AuthRevoke),
 
   search: (request: SearchRequest): Promise<Operation<SearchResult>> =>

@@ -4,6 +4,7 @@ import type { QueueItem } from '@shared/types'
 import type { IconName } from '@renderer/components/Icon'
 import { useAppStore } from '@renderer/store/app'
 import { useQueueStore } from '@renderer/store/queue'
+import { useProfilesStore } from '@renderer/store/profiles'
 import { useUiStore } from '@renderer/store/ui'
 import { AppIcon } from '@renderer/components/AppIcon'
 import { QueueStateBadge } from '@renderer/components/Badges'
@@ -44,6 +45,12 @@ function actionButton(icon: IconName, label: string, onClick: () => void, danger
  */
 const DownloadRow = memo(function DownloadRow({ item }: RowProps): ReactNode {
   const t = useAppStore((state) => state.t)
+  // Only worth showing when more than one account exists.
+  const profileName = useProfilesStore((state) =>
+    state.profiles.length > 1
+      ? (state.profiles.find((profile) => profile.id === item.profileId)?.name ?? '?')
+      : null
+  )
   const control = useQueueStore((state) => state.control)
   const deletePartial = useQueueStore((state) => state.deletePartial)
   const askConfirm = useUiStore((state) => state.askConfirm)
@@ -82,6 +89,12 @@ const DownloadRow = memo(function DownloadRow({ item }: RowProps): ReactNode {
             </span>
           ) : null}
           {item.platform ? <span className="badge shrink-0">{item.platform}</span> : null}
+          {profileName ? (
+            <span className="badge badge-accent shrink-0" title={t('accounts.active')}>
+              <Icon name="user" size={10} />
+              {profileName}
+            </span>
+          ) : null}
           <QueueStateBadge state={item.state} />
           <span className="mono ml-auto shrink-0 faint">{item.bundleID || `id ${item.appId}`}</span>
         </div>
