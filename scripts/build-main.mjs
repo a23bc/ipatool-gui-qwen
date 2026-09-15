@@ -67,15 +67,29 @@ const entries = [
 ]
 
 async function main() {
-  await rm(outDir, { recursive: true, force: true })
+  // Only clean what this script owns: wiping the whole dist/ also deleted
+  // dist/renderer whenever `vite build` had already run (the two builders
+  // share the output root).
+  await rm(path.join(outDir, 'main'), { recursive: true, force: true })
+  await rm(path.join(outDir, 'preload'), { recursive: true, force: true })
   await mkdir(path.join(outDir, 'main'), { recursive: true })
   await mkdir(path.join(outDir, 'preload'), { recursive: true })
 
   if (watch) {
+    const contexts = []
     for (const options of entries) {
       const ctx = await (await import('esbuild')).context(options)
       await ctx.watch()
+      contexts.push(ctx)
     }
+    // Dispose the watch contexts on shutdown so dev restarts cannot leak
+    // esbuild's file watchers / fds (dev.mjs sends SIGTERM/SIGKILL).
+    const dispose = async () => {
+      await Promise.all(contexts.map((ctx) => ctx.dispose().catch(() => {})))
+      process.exit(0)
+    }
+    process.on('SIGINT', () => void dispose())
+    process.on('SIGTERM', () => void dispose())
     console.log('[build-main] watching src/main + src/preload …')
     return
   }

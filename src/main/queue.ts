@@ -285,6 +285,7 @@ export class DownloadQueue extends EventEmitter {
     const target = index + delta
     if (index < 0 || target < 0 || target >= this.items.length) return
     const [item] = this.items.splice(index, 1)
+    if (!item) return
     this.items.splice(target, 0, item)
     this.emitSnapshot(true)
   }
@@ -353,6 +354,8 @@ export class DownloadQueue extends EventEmitter {
       if (handle.timer) clearInterval(handle.timer)
       if (handle.pollTimer) clearInterval(handle.pollTimer)
       this.running.delete(item.id)
+      // The throttle stamp only matters while progress is being emitted.
+      this.progressStamps.delete(item.id)
     }
     if (item.state === 'running' || item.state === 'waiting' || item.state === 'queued') {
       item.state = state
@@ -509,6 +512,7 @@ export class DownloadQueue extends EventEmitter {
 
     this.clearTimers(handle)
     this.running.delete(item.id)
+    this.progressStamps.delete(item.id)
 
     const finalPath = outcomePath || (await this.findFinishedFile(item)) || ''
     item.state = 'done'
@@ -542,6 +546,7 @@ export class DownloadQueue extends EventEmitter {
 
   private fail(item: QueueItem, message: string): void {
     const classified = classifyError(message)
+    this.progressStamps.delete(item.id)
     item.state = 'error'
     item.finishedAt = Date.now()
     item.progress.speed = 0
@@ -590,6 +595,11 @@ export class DownloadQueue extends EventEmitter {
    * ignored so stale leftovers from previous sessions do not confuse the counter.
    */
   private async scanDir(item: QueueItem, suffixes: string[]): Promise<string[]> {
+    // Without at least one identifying token every suffixed file in the folder
+    // would "belong" to this item - in a shared download directory that means
+    // claiming another instance's (or the user's own) package as ours.
+    if (!item.appId && !item.bundleID) return []
+
     let names: string[]
     try {
       names = await readdir(item.outputDir)
@@ -664,12 +674,6 @@ export class DownloadQueue extends EventEmitter {
       etaSec: item.progress.etaSec
     }
     this.emit('progress', event)
-  }
-
-  /** Body text for the OS notification raised when an item settles. */
-  static notificationBody(item: QueueItem): string {
-    if (item.state === 'done') return `${item.name} finished downloading`
-    return `${item.name} failed: ${item.error?.message ?? 'unknown error'}`
   }
 
   get queueFile(): string {

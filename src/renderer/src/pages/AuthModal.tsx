@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { LoginStatus } from '@shared/types'
+import type { LoginResult, LoginStatus } from '@shared/types'
 import { useAppStore } from '@renderer/store/app'
 import { useProfilesStore, activeProfile } from '@renderer/store/profiles'
 import { useUiStore } from '@renderer/store/ui'
@@ -53,9 +53,16 @@ export function AuthModal(): ReactNode {
   const [failure, setFailure] = useState<{ message: string; code: string | null } | null>(null)
   const [checking, setChecking] = useState(false)
 
-  // Reset transient state each time the dialog opens.
+  // Reset transient state each time the dialog opens - and scrub the password
+  // the moment it closes. The dialog stays mounted while hidden (Modal returns
+  // null but this component lives on), so without the close branch the typed
+  // password would linger in React state until the next open.
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setPassword('')
+      setCode('')
+      return
+    }
     void loadProfiles()
     setStep('credentials')
     // The active profile has no stored session: make sure a stale global
@@ -67,7 +74,9 @@ export function AuthModal(): ReactNode {
     setFailure(null)
     setBusy(false)
     setEmail(useAppStore.getState().settings.lastEmail)
-  }, [open])
+    // loadProfiles is a stable zustand reference; listing it keeps the
+    // exhaustive-deps contract honest without changing behaviour.
+  }, [open, loadProfiles])
 
   const submit = async (): Promise<void> => {
     if (busy) return
@@ -76,28 +85,46 @@ export function AuthModal(): ReactNode {
     setBusy(true)
     setFailure(null)
 
-    const result = await window.api.login(
-      email.trim(),
-      password,
-      step === 'code' ? code.trim() : undefined,
-      profile?.id
-    )
-
-    setBusy(false)
+    let result: LoginResult
+    try {
+      result = await window.api.login(
+        email.trim(),
+        password,
+        step === 'code' ? code.trim() : undefined,
+        profile?.id
+      )
+    } catch (error) {
+      // The bridge itself failed (main crashed, invoke rejected): roll the UI
+      // back instead of leaving the dialog spinning forever, and scrub the
+      // password - the attempt is over either way.
+      setFailure({ message: String(error), code: null })
+      setPassword('')
+      setCode('')
+      setStep('credentials')
+      return
+    } finally {
+      setBusy(false)
+    }
 
     if (result.status === 'ok') {
       if (remember) await updateSettings({ lastEmail: email.trim() })
       else if (settings.lastEmail) await updateSettings({ lastEmail: '' })
       // Opt-in only: storing the password is what makes one-click switching
       // possible on platforms whose keyring is a single machine-wide slot.
+      // A storage failure (e.g. no libsecret) must not undo a successful login.
       const target = profile?.id
       if (target) {
-        if (rememberPassword) {
-          await useProfilesStore
-            .getState()
-            .storePassword(target, password, result.account?.email ?? email.trim())
+        try {
+          if (rememberPassword) {
+            await useProfilesStore
+              .getState()
+              .storePassword(target, password, result.account?.email ?? email.trim())
+          } else {
+            await useProfilesStore.getState().forgetPassword(target)
+          }
+        } catch (error) {
+          toast({ kind: 'warn', message: t('auth.success', { email: result.account?.email ?? email }), detail: String(error) })
         }
-        else await useProfilesStore.getState().forgetPassword(target)
       }
       useAppStore.getState().setAccount(result.account)
       void useProfilesStore.getState().load()
@@ -114,18 +141,33 @@ export function AuthModal(): ReactNode {
     }
 
     setFailure({ message: result.message, code: codeForStatus(result.status) })
-    if (result.status === 'needs-2fa') setCode('')
+    if (result.status === 'needs-2fa') {
+      // Wrong/expired code: the flow continues at the code step, so keep the
+      // verified password and only reset the code field.
+      setCode('')
+    } else {
+      // Any other failure ends the attempt: scrub the password and return to
+      // the credentials step rather than leaving it in React state.
+      setPassword('')
+      setCode('')
+      setStep('credentials')
+    }
   }
 
   const recheck = async (): Promise<void> => {
     setChecking(true)
-    const info = await refreshAccount()
-    setChecking(false)
-    toast(
-      info
-        ? { kind: 'success', message: t('auth.success', { email: info.email }) }
-        : { kind: 'warn', message: t('auth.signedOut') }
-    )
+    try {
+      const info = await refreshAccount()
+      toast(
+        info
+          ? { kind: 'success', message: t('auth.success', { email: info.email }) }
+          : { kind: 'warn', message: t('auth.signedOut') }
+      )
+    } catch (error) {
+      toast({ kind: 'error', message: String(error) })
+    } finally {
+      setChecking(false)
+    }
   }
 
   return (

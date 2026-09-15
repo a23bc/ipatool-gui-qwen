@@ -59,6 +59,19 @@ function applyTheme(theme: 'light' | 'dark'): void {
 }
 
 let initialised = false
+let disposers: Array<() => void> = []
+
+/**
+ * Unsubscribes every IPC listener installed by init() and allows a fresh
+ * init(). Production code never calls this (the module-level guard makes init
+ * idempotent); it exists for HMR teardown and unit tests, which otherwise
+ * leave listeners dangling on window.api across module reloads/imports.
+ */
+export function disposeAppStore(): void {
+  for (const dispose of disposers) dispose()
+  disposers = []
+  initialised = false
+}
 
 export const useAppStore = create<AppState>()((set, get) => ({
   appInfo: null,
@@ -132,25 +145,31 @@ export const useAppStore = create<AppState>()((set, get) => ({
     })
 
     // --- event subscriptions -------------------------------------------
-    api.on('engine:status', (next) => set({ engine: next }))
-    api.on('engine:progress', (next) => set({ engine: next }))
+    // Every unsubscribe is collected so disposeAppStore() can fully detach
+    // this store from the bridge (HMR / tests).
+    disposers.push(api.on('engine:status', (next) => set({ engine: next })))
+    disposers.push(api.on('engine:progress', (next) => set({ engine: next })))
 
-    api.on('account:changed', (next) => set({ account: next, accountChecked: true }))
+    disposers.push(api.on('account:changed', (next) => set({ account: next, accountChecked: true })))
 
-    api.on('system:theme', (next) => {
-      set({ systemTheme: next })
-      applyTheme(resolveTheme(get().settings.theme, next))
-    })
+    disposers.push(
+      api.on('system:theme', (next) => {
+        set({ systemTheme: next })
+        applyTheme(resolveTheme(get().settings.theme, next))
+      })
+    )
 
-    api.on('settings:changed', (next) => {
-      const locale = resolveLocale(next.locale, get().appInfo?.locale ?? '')
-      applyTheme(resolveTheme(next.theme, get().systemTheme))
-      set((state) => ({
-        settings: next,
-        locale,
-        t: locale === state.locale ? state.t : createTranslator(locale)
-      }))
-    })
+    disposers.push(
+      api.on('settings:changed', (next) => {
+        const locale = resolveLocale(next.locale, get().appInfo?.locale ?? '')
+        applyTheme(resolveTheme(next.theme, get().systemTheme))
+        set((state) => ({
+          settings: next,
+          locale,
+          t: locale === state.locale ? state.t : createTranslator(locale)
+        }))
+      })
+    )
 
     // The main process resolves/downloads the engine after first paint; make
     // sure we show its latest state even if the events raced the subscription.

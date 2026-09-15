@@ -126,11 +126,22 @@ downloading  21% [======>       ] (12/45 MB, 1.2 MB/s)
 
 ### 安全模型
 
-- 渲染进程 `sandbox: true` + `contextIsolation: true` + 严格 CSP；禁止导航与新建窗口；
-- preload 只暴露一个冻结的 `window.api` 对象（显式白名单）；
+- 渲染进程 `sandbox: true` + `contextIsolation: true` + 严格 CSP；生产构建关闭 DevTools；
+  导航仅允许应用自身的 renderer 入口，新窗口一律拒绝；
+- preload 只暴露一个冻结的 `window.api` 对象（显式白名单），事件订阅在 preload 内做运行时通道校验；
+- **IPC 表面最小信任**：`fs:open-path` 仅允许打开下载目录 / userData / 队列输出目录内的
+  目录与 `.ipa/.pkg/.txt/.log` 文件（`shell.openPath` 会直接启动可执行文件，必须白名单）；
+  命令行控制台（`run:raw`）只放行只读子命令（`search` / `list-versions` / `list-purchases` /
+  `get-version-metadata` / `auth info`），登录、吊销、下载、购买必须走各自的专用通道；
 - **密码 / 2FA / 钥匙串口令在落盘、展示、导出前全部脱敏**；Apple ID 密码从不持久化；
 - 托管钥匙串口令用 Electron `safeStorage`（DPAPI / Keychain / libsecret）加密存储；
-- 引擎下载校验官方 `.sha256sum`，不一致即拒绝安装。
+  **`safeStorage` 不可用时拒绝落盘**（自动降级为 `passphraseMode=none` 并告警），绝不写明文；
+  记住密码功能在无加密存储的系统上会明确报错而不是静默丢弃；
+- 引擎下载校验官方 `.sha256sum`，不一致即拒绝安装；**校验文件永远从 github.com 原始地址
+  拉取**——即使配置了镜像，镜像也只代理二进制下载本身，绝不同时代理校验源
+  （否则镜像可以同时伪造产物与校验和，验证形同虚设）；
+- tar 解析器在源头拒绝绝对路径与 `..` 穿越条目（包括 symlink 目标），`packageFileName`
+  对用户输入的 version 做路径分隔符消毒。
 
 ---
 
@@ -143,6 +154,15 @@ downloading  21% [======>       ] (12/45 MB, 1.2 MB/s)
 
 - **macOS**：首次打开请右键 → 打开（或 `xattr -d com.apple.quarantine`）；
 - **Windows**：接受 SmartScreen 提示即可。
+
+> ⚠️ **未签名意味着分发链路上的任何中间人（镜像站 / CDN）都可以替换安装包而用户无从校验。**
+> 因此本项目**禁止在未启用代码签名前切换到 `electron-updater` 自动更新**：未签名的
+> auto-update 通道是 RCE 向量（攻击者替换 `latest.yml` 即可让所有客户端执行任意代码）。
+> 当前的更新检查只做「提示 + 跳转 Release 页」，由用户手动下载。
+>
+> 持有证书的 fork 无需修改仓库即可签名：导出 `CSC_LINK`（证书 base64）与
+> `CSC_KEY_PASSWORD` 环境变量，electron-builder 会自动拾取；macOS 上再追加
+> `-c.mac.hardenedRuntime=true -c.mac.notarize.teamId=<TEAM_ID>` 完成加固与公证。
 
 > **触发模型（默认不发布任何东西）：**
 >
@@ -192,9 +212,15 @@ npm run dist:linux   # AppImage + deb
 ### 测试
 
 ```bash
-npm test             # vitest：命令构建、输出解析、tar 解包、错误分类、脱敏、导入解析、队列合并
-npm run typecheck    # 主进程/preload 与 渲染进程 两个 tsconfig 全量检查
+npm test             # vitest（含覆盖率门槛）：shared 纯逻辑 + main 进程防御代码
+npm run test:watch   # 监听模式（关闭覆盖率，跑得更快）
+npm run typecheck    # 主进程/preload 与 渲染进程 两个 tsconfig 全量检查（noUncheckedIndexedAccess 已开启）
+npm run lint         # ESLint（typescript-eslint + react/react-hooks）
+npm run format       # Prettier
 ```
+
+覆盖率门槛在 `vitest.config.ts`：`src/shared/**` 按高水位设卡（纯函数层），
+全局地板随 main 进程测试的补齐逐步上调。CI 对以上四项全量执行。
 
 ---
 
@@ -210,6 +236,8 @@ npm run typecheck    # 主进程/preload 与 渲染进程 两个 tsconfig 全量
 全都找不到且开启了自动安装时，从 `majd/ipatool` Releases 下载匹配当前
 `os/arch` 的 `ipatool-<v>-<os>-<arch>.tar.gz`，校验 `.sha256sum` 后解包安装。
 可在设置中固定版本或配置镜像前缀（例如 `https://gh-proxy.com`）。
+注意：**镜像只加速二进制下载，`.sha256sum` 校验文件始终从 github.com 原始地址获取**，
+不受镜像配置影响——这是供应链校验有效性的前提。
 
 ---
 
@@ -239,6 +267,30 @@ tests/               vitest 单测 + 真实 tar 固件
 ```
 
 ---
+
+## 安全披露
+
+本项目处理 Apple ID 凭据、密码与钥匙串口令，属于高敏感软件。如果你发现了安全漏洞：
+
+- **请勿提交公开 issue**；
+- 优先使用 GitHub 的 **Private vulnerability reporting**（仓库 → Security →
+  Report a vulnerability）；若未开启，请通过维护者私下渠道联系；
+- 请附带最小复现步骤与影响面说明；我们会在修复发布后再公开细节。
+
+依赖链安全由 Dependabot（`.github/dependabot.yml`）每周跟踪。
+
+## 错误处理约定
+
+代码库遵循统一的错误处理决策树（新增代码请照此归类）：
+
+| 层 | 约定 |
+| --- | --- |
+| shared 纯逻辑 | 直接 `throw`（调用方决定语义） |
+| main 进程状态机（engine） | 不 throw；`set(status('error', ...))` 通过事件面呈现 |
+| main 进程 IPC handler | 用 `wrap()` 把 throw 转成结构化 `OperationFailure`（带可翻译 code） |
+| main 进程队列 | catch 后 `fail(item, message)`，错误进入 item.error |
+| renderer store action | 每个 `await window.api.*` 都必须 try/catch：catch 中回滚 loading/禁用态并 toast |
+| 凭据写入 | safeStorage 不可用时 throw（绝不静默降级为明文/丢弃） |
 
 ## 许可与声明
 

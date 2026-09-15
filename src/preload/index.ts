@@ -30,6 +30,7 @@ import type {
   PurchasesResult,
   QueueSnapshot,
   PurchaseOutcome,
+  RawRunRequest,
   SearchResult,
   Settings,
   TaskRecord,
@@ -40,10 +41,40 @@ import type {
 import type { AppSelector } from '../shared/ipatool/args'
 import type { QueueAction, SearchRequest, PurchasesRequest, EnqueueOptions } from '../shared/ipc'
 
+/**
+ * Runtime mirror of `EventChannel` (the keyof of a type does not exist at
+ * runtime). `on()` validates against it because TypeScript types evaporate
+ * across the contextBridge: a compromised page calling
+ * `api.on('task:log' as never, ...)` with a made-up or high-frequency channel
+ * gets a no-op unsubscribe instead of a live subscription.
+ *
+ * The `Set<EventChannel>` annotation keeps this list compile-time-checked
+ * against the shared contract; when EventPayloadMap grows, add the channel here.
+ */
+const EVENT_CHANNELS: ReadonlySet<string> = new Set<EventChannel>([
+  'engine:status',
+  'engine:progress',
+  'account:changed',
+  'settings:changed',
+  'task:created',
+  'task:log',
+  'task:finished',
+  'queue:snapshot',
+  'queue:progress',
+  'queue:item-finished',
+  'system:theme',
+  'window:maximized',
+  'update:state'
+])
+
 const api: RendererApi = {
   getAppInfo: (): Promise<AppInfoPayload> => ipcRenderer.invoke(IPC.AppInfo),
 
   on<K extends EventChannel>(channel: K, listener: (payload: EventPayloadMap[K]) => void): () => void {
+    if (!EVENT_CHANNELS.has(channel as string)) {
+      console.warn(`[preload] refused subscription to unknown event channel: ${String(channel)}`)
+      return () => {}
+    }
     const wrapped = (_event: Electron.IpcRendererEvent, payload: EventPayloadMap[K]): void => {
       try {
         listener(payload)
@@ -141,8 +172,7 @@ const api: RendererApi = {
   exportTasks: (): Promise<string | null> => ipcRenderer.invoke(IPC.TasksExport),
   cancelTask: (id: string): Promise<void> => ipcRenderer.invoke(IPC.TasksCancel, id),
 
-  runRaw: (request: { args: string[]; interactive?: boolean }): Promise<Operation<string>> =>
-    ipcRenderer.invoke(IPC.RunRaw, request),
+  runRaw: (request: RawRunRequest): Promise<Operation<string>> => ipcRenderer.invoke(IPC.RunRaw, request),
 
   minimize: (): void => {
     ipcRenderer.send(IPC.WindowMinimize)

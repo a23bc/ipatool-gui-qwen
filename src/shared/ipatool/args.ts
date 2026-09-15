@@ -175,10 +175,15 @@ export function packageFileName(
   version: string,
   platform: Platform
 ): string {
+  // version (and in theory bundleID) can be user-supplied via an import list,
+  // so strip path separators and leading dots: neither may turn the predicted
+  // file name into a path-traversal payload like `../../etc/passwd.ipa`.
+  const sanitize = (value: string): string => value.replace(/[\\/]/g, '_').replace(/^\.+/, '')
+
   const parts: string[] = []
-  if (bundleID) parts.push(bundleID)
+  if (bundleID) parts.push(sanitize(bundleID))
   if (appId) parts.push(String(appId))
-  if (version) parts.push(version)
+  if (version) parts.push(sanitize(version))
   const ext = platform === 'macos' ? 'pkg' : 'ipa'
   return `${parts.join('_')}.${ext}`
 }

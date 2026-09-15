@@ -28,6 +28,9 @@ const LOOKUP_TIMEOUT_MS = 12_000
 
 /** Requests larger artwork than the 100px thumbnail Apple returns by default. */
 function upscale(url: string, size = 400): string {
+  // Explicit guard: if the URL carries no `<W>x<H>.` token there is nothing to
+  // rewrite, and returning it unchanged is the only safe fallback.
+  if (!/\/\d+x\d+[a-z]{0,2}\./i.test(url)) return url
   return url.replace(/\/\d+x\d+([a-z]{0,2})\./i, `/${size}x${size}$1.`)
 }
 
@@ -176,11 +179,11 @@ export class ArtworkCache {
     this.negative.clear()
     let removed = 0
     try {
-      const names = await readdir(this.cacheDir())
-      for (const name of names) {
-        await rm(path.join(this.cacheDir(), name), { force: true })
-        removed += 1
-      }
+      const dir = this.cacheDir()
+      removed = (await readdir(dir)).length
+      // One recursive remove instead of N serial fs calls; load() re-creates
+      // the directory lazily on the next cache miss.
+      await rm(dir, { recursive: true, force: true })
     } catch {
       /* nothing cached yet */
     }

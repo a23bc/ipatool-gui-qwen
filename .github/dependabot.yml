@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Keep the transitive toolchain (electron-builder deps) in one PR.
+      dev-tooling:
+        patterns:
+          - 'electron*'
+          - 'esbuild'
+          - 'vite*'
+          - 'vitest'
+          - '@vitest/*'
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

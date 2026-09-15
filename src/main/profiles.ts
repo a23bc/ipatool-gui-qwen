@@ -15,6 +15,7 @@
  *    never resumes under a different account after a switch.
  */
 
+import { randomBytes } from 'node:crypto'
 import { mkdir, rename as renameDir, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -87,13 +88,15 @@ export function recordedSessionEmail(id: string): string | null | undefined {
 }
 
 function newId(): string {
-  return `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+  // 32 bits of CSPRNG on top of the timestamp: two profiles created in the
+  // same millisecond can no longer collide.
+  return `p${Date.now().toString(36)}${randomBytes(4).toString('hex')}`
 }
 
 /** Guarantees at least one profile exists (called during settings load). */
 export function ensureDefault(): Profile {
-  const existing = list()
-  if (existing.length > 0) return existing[0]
+  const first = list()[0]
+  if (first) return first
 
   const profile: Profile = {
     id: 'p-default',
@@ -200,7 +203,9 @@ export async function remove(id: string): Promise<{ removedDir: boolean; path: s
   if (!profile) return { removedDir: false, path: null }
 
   const dir = dirFor(profile)
-  const managed = dir.startsWith(profilesRoot() + path.sep) || dir === profilesRoot()
+  // dirFor() always appends `<id>/state` for managed profiles, so a strict
+  // prefix check is sufficient - the root itself can never be a profile dir.
+  const managed = dir.startsWith(profilesRoot() + path.sep)
   let removedDir = false
 
   if (managed) {
@@ -212,9 +217,13 @@ export async function remove(id: string): Promise<{ removedDir: boolean; path: s
     }
   }
 
+  // The recorded-session mirror must not outlive the profile it describes.
+  sessionEmail.delete(id)
+
   const remaining = list().filter((p) => p.id !== id)
   const finalProfiles = remaining.length > 0 ? remaining : [ensureDefaultAfterWipe()]
-  const activeId = settingsStore.getInternal().activeProfileId === id ? finalProfiles[0].id : settingsStore.getInternal().activeProfileId
+  const previousActive = settingsStore.getInternal().activeProfileId
+  const activeId = previousActive === id ? (finalProfiles[0]?.id ?? previousActive) : previousActive
   commit(finalProfiles, activeId)
   return { removedDir, path: managed ? dir : null }
 }
@@ -244,7 +253,26 @@ function ensureDefaultAfterWipe(): Profile {
  *
  * Returns the new location, or null when there was nothing to migrate.
  */
-export async function migrateLegacyState(): Promise<'migrated' | 'quarantined' | null> {
+/**
+ * The migration runs at most once per process: after the first call the legacy
+ * directory either moved or was quarantined, so the repeat calls that used to
+ * sit in two IPC handlers could only ever return null. Caching the promise
+ * also de-duplicates concurrent callers (startup vs. an early profiles:add).
+ */
+let migrationPromise: Promise<'migrated' | 'quarantined' | null> | null = null
+
+export function migrateLegacyState(): Promise<'migrated' | 'quarantined' | null> {
+  if (!migrationPromise) {
+    migrationPromise = doMigrateLegacyState().catch((error: unknown) => {
+      // A failed migration may be retried on the next call.
+      migrationPromise = null
+      throw error
+    })
+  }
+  return migrationPromise
+}
+
+async function doMigrateLegacyState(): Promise<'migrated' | 'quarantined' | null> {
   const legacy = path.join(os.homedir(), '.ipatool')
   const target = path.join(dirFor(ensureDefault()), 'ipatool')
 

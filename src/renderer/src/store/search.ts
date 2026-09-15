@@ -96,7 +96,19 @@ export const useSearchStore = create<SearchState>()((set, get) => ({
 
     set({ loading: true, error: null, query })
 
-    const result = await window.api.search({ term: query, limit, platform })
+    let result
+    try {
+      result = await window.api.search({ term: query, limit, platform })
+    } catch (error) {
+      // IPC itself rejected (main crashed / bridge gone). Without this the
+      // store would spin forever: loading stays true and nothing can retry.
+      set({
+        loading: false,
+        results: [],
+        error: { message: String(error), hint: null, code: null }
+      })
+      return
+    }
 
     if (!result.ok) {
       set({

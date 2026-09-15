@@ -76,8 +76,13 @@ export function parseEntry(rawLine: string): ParsedEntry | null {
   const plain: string[] = []
   for (const cell of cells) {
     const match = cell.match(/^([A-Za-z_ ]+)[:=]\s*(.+)$/)
-    if (match) fields[match[1].trim().toLowerCase().replace(/\s+/g, '_')] = match[2].trim()
-    else plain.push(cell)
+    const key = match?.[1]
+    const value = match?.[2]
+    if (key !== undefined && value !== undefined) {
+      fields[key.trim().toLowerCase().replace(/\s+/g, '_')] = value.trim()
+    } else {
+      plain.push(cell)
+    }
   }
 
   const idRaw = fields.id ?? fields.app_id ?? fields.appid ?? fields.track_id ?? fields.trackid
@@ -133,7 +138,9 @@ export function parseImportList(text: string): ParsedEntry[] {
   for (const rawLine of text.split(/\r?\n/)) {
     const entry = parseEntry(rawLine)
     if (!entry) continue
-    const dedupeKey = `${entry.appId ?? 0}|${entry.bundleID ?? ''}|${entry.externalVersionID ?? ''}|${entry.platform ?? ''}`
+    // version is part of the identity: the same app at two different display
+    // versions (without external IDs) is two legitimate download requests.
+    const dedupeKey = `${entry.appId ?? 0}|${entry.bundleID ?? ''}|${entry.version ?? ''}|${entry.externalVersionID ?? ''}|${entry.platform ?? ''}`
     if (seen.has(dedupeKey)) continue
     seen.add(dedupeKey)
     out.push(entry)

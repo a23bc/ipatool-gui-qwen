@@ -29,6 +29,14 @@ export interface TasksState {
 }
 
 let subscriptionsActive = false
+let disposers: Array<() => void> = []
+
+/** Detaches the task-log IPC listeners (HMR teardown / unit tests). */
+export function disposeTasksStore(): void {
+  for (const dispose of disposers) dispose()
+  disposers = []
+  subscriptionsActive = false
+}
 
 function capFor(): number {
   return useAppStore.getState().settings.maxLogLines || DEFAULT_CAP
@@ -50,16 +58,16 @@ export const useTasksStore = create<TasksState>()((set, get) => ({
     if (subscriptionsActive) return
     subscriptionsActive = true
 
-    window.api.on('task:created', (task) => {
+    disposers.push(window.api.on('task:created', (task) => {
       set((state) => ({
         tasks: [task, ...state.tasks.filter((t) => t.id !== task.id)],
         lines: { ...state.lines, [task.id]: [] }
       }))
       // Follow the newest task automatically when nothing is selected.
       if (!get().selectedId) set({ selectedId: task.id })
-    })
+    }))
 
-    window.api.on('task:log', ({ taskId, line }) => {
+    disposers.push(window.api.on('task:log', ({ taskId, line }) => {
       set((state) => {
         const existing = state.lines[taskId]
         const cap = capFor()
@@ -84,13 +92,13 @@ export const useTasksStore = create<TasksState>()((set, get) => ({
         if (next.length > cap) next = next.slice(next.length - cap)
         return { lines: { ...state.lines, [taskId]: next } }
       })
-    })
+    }))
 
-    window.api.on('task:finished', (task) => {
+    disposers.push(window.api.on('task:finished', (task) => {
       set((state) => ({
         tasks: state.tasks.map((existing) => (existing.id === task.id ? { ...existing, ...task } : existing))
       }))
-    })
+    }))
   },
 
   select(selectedId) {

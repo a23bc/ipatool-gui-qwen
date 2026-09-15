@@ -33,6 +33,9 @@ type Store = Record<string, StoredCredential>
 
 let cache: Store | null = null
 let file = ''
+let tmpSequence = 0
+/** In-flight load, shared so concurrent first-accessors mutate ONE cache. */
+let loading: Promise<Store> | null = null
 
 function filePath(): string {
   if (!file) file = path.join(app.getPath('userData'), FILE_NAME)
@@ -49,6 +52,19 @@ function available(): boolean {
 
 async function load(): Promise<Store> {
   if (cache) return cache
+  // Without this, two concurrent first-loaders would each build their own
+  // Store object and the later assignment would drop the earlier one's
+  // mutations (a lost-update race on set()).
+  if (!loading) {
+    loading = doLoad().finally(() => {
+      loading = null
+    })
+  }
+  return loading
+}
+
+async function doLoad(): Promise<Store> {
+  if (cache) return cache
   try {
     const raw = await readFile(filePath(), 'utf8')
     const parsed = JSON.parse(raw) as Record<string, string>
@@ -58,12 +74,21 @@ async function load(): Promise<Store> {
       if (!available()) continue
       try {
         const plain = safeStorage.decryptString(Buffer.from(value.slice(PREFIX.length), 'base64'))
-        const decoded = JSON.parse(plain) as { password?: string; email?: string }
-        // Legacy entries were bare passwords; accept them without an email.
-        if (typeof decoded.password === 'string') {
-          out[id] = { password: decoded.password, email: typeof decoded.email === 'string' ? decoded.email : '' }
-        } else if (typeof plain === 'string' && plain !== '') {
-          out[id] = { password: plain, email: '' }
+        // Current entries are JSON ({ password, email }); legacy entries were
+        // bare passwords, which JSON.parse rejects - treat that as the legacy
+        // shape instead of dropping the credential.
+        let decoded: { password?: unknown; email?: unknown }
+        try {
+          const parsed: unknown = JSON.parse(plain)
+          decoded = parsed && typeof parsed === 'object' ? (parsed as { password?: unknown; email?: unknown }) : { password: plain }
+        } catch {
+          decoded = { password: plain }
+        }
+        if (typeof decoded.password === 'string' && decoded.password !== '') {
+          out[id] = {
+            password: decoded.password,
+            email: typeof decoded.email === 'string' ? decoded.email : ''
+          }
         }
       } catch {
         /* unreadable entry: drop it rather than fail the whole store */
@@ -77,19 +102,39 @@ async function load(): Promise<Store> {
 }
 
 async function persist(): Promise<void> {
+  // m-M8: never write a silently-emptied store. Without safeStorage the
+  // encoded map below would be `{}` and every stored password would vanish on
+  // the next load; refusing loudly keeps the UI honest instead.
+  if (!available()) {
+    throw new Error(
+      'System credential storage is unavailable (on Linux install libsecret / gnome-keyring); nothing was written'
+    )
+  }
   const store = cache ?? {}
   const encoded: Record<string, string> = {}
-  if (available()) {
-    for (const [id, value] of Object.entries(store)) {
-      encoded[id] = PREFIX + safeStorage.encryptString(JSON.stringify(value)).toString('base64')
-    }
+  for (const [id, value] of Object.entries(store)) {
+    encoded[id] = PREFIX + safeStorage.encryptString(JSON.stringify(value)).toString('base64')
   }
-  const tmp = `${filePath()}.${process.pid}.tmp`
-  await writeFile(tmp, JSON.stringify(encoded), { encoding: 'utf8', mode: 0o600 })
-  await rename(tmp, filePath())
+  // Unique tmp name per write: two concurrent persist() calls sharing one
+  // fixed name would race, and the second rename() would fail with ENOENT.
+  tmpSequence += 1
+  const tmp = `${filePath()}.${process.pid}.${Date.now()}.${tmpSequence}.tmp`
+  try {
+    await writeFile(tmp, JSON.stringify(encoded), { encoding: 'utf8', mode: 0o600 })
+    await rename(tmp, filePath())
+  } catch (error) {
+    await rm(tmp, { force: true }).catch(() => {})
+    throw error
+  }
 }
 
 export async function set(profileId: string, password: string, email: string): Promise<void> {
+  if (!available()) {
+    throw new Error(
+      'Passwords cannot be stored on this system: safeStorage encryption is unavailable ' +
+        '(on Linux install libsecret / gnome-keyring). Sign in manually after switching accounts.'
+    )
+  }
   const store = await load()
   store[profileId] = { password, email: email.trim().toLowerCase() }
   await persist()
@@ -98,6 +143,12 @@ export async function set(profileId: string, password: string, email: string): P
 export async function clear(profileId: string): Promise<void> {
   const store = await load()
   delete store[profileId]
+  if (!available()) {
+    // Nothing readable can exist without encryption; drop the file outright.
+    cache = store
+    await rm(filePath(), { force: true })
+    return
+  }
   await persist()
 }
 
@@ -116,10 +167,17 @@ export async function forgetAllExcept(ids: string[]): Promise<void> {
   for (const id of Object.keys(store)) {
     if (!ids.includes(id)) delete store[id]
   }
+  if (!available()) {
+    cache = store
+    await rm(filePath(), { force: true })
+    return
+  }
   await persist()
 }
 
 export async function wipe(): Promise<void> {
-  cache = {}
+  // null (not {}) so the next load() re-reads from disk instead of
+  // short-circuiting on a truthy empty cache.
+  cache = null
   await rm(filePath(), { force: true })
 }

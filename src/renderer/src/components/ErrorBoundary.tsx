@@ -32,7 +32,8 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   private copy = (): void => {
-    const text = `${this.state?.error?.message ?? ''}\n${this.state?.error?.stack ?? ''}`
+    // `state` is never nullish on a class component; only `error` is.
+    const text = `${this.state.error?.message ?? ''}\n${this.state.error?.stack ?? ''}`
     try {
       void window.api?.copyText(text)
     } catch {

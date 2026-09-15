@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { quoteCommand } from '@shared/format'
 import { redactArgs } from '@shared/redact'
@@ -8,12 +8,14 @@ import { useUiStore } from '@renderer/store/ui'
 import { ErrorNotice } from '@renderer/components/ErrorNotice'
 import { Icon, Spinner } from '@renderer/components/Icon'
 
+// Only read-only subcommands are allowed here (the main process enforces an
+// allow-list): sign-in, downloads and purchases go through the dedicated UI,
+// which carries 2FA handling, profile scoping and credential storage.
 const EXAMPLES: Array<{ args: string; note: string }> = [
   { args: 'auth info', note: 'current session' },
   { args: 'search telegram --limit 10', note: 'search' },
   { args: 'list-versions -i 686449807', note: 'version history by app id' },
   { args: 'list-purchases -l 50 -p 1', note: 'first page of owned apps' },
-  { args: 'download -b com.apple.mobilesafari --purchase', note: 'download by bundle id' },
   { args: 'get-version-metadata -i 686449807 --external-version-id 86394041', note: 'version metadata' }
 ]
 
@@ -29,12 +31,15 @@ export function parseArgv(input: string): string[] {
 
   for (let i = 0; i < input.length; i += 1) {
     const char = input[i]
+    // Unreachable inside the loop bounds; keeps the compiler honest under
+    // noUncheckedIndexedAccess without changing behaviour.
+    if (char === undefined) break
     if (quote) {
       if (char === quote) {
         quote = null
       } else if (char === '\\' && quote === '"' && i + 1 < input.length) {
         i += 1
-        current += input[i]
+        current += input[i] ?? ''
       } else {
         current += char
       }
@@ -47,7 +52,7 @@ export function parseArgv(input: string): string[] {
     }
     if (char === '\\' && i + 1 < input.length) {
       i += 1
-      current += input[i]
+      current += input[i] ?? ''
       hasToken = true
       continue
     }
@@ -77,7 +82,8 @@ export function ConsoleView(): ReactNode {
   const select = useTasksStore((state) => state.select)
   const setView = useUiStore((state) => state.setView)
 
-  const argv = parseArgv(input)
+  // Memoised: parseArgv rescans the whole input on every keystroke otherwise.
+  const argv = useMemo(() => parseArgv(input), [input])
   const preview = argv.length > 0 ? `ipatool ${quoteCommand(redactArgs(argv))}` : ''
 
   const run = async (): Promise<void> => {
@@ -86,16 +92,22 @@ export function ConsoleView(): ReactNode {
     setError(null)
     setOutput('')
 
-    const result = await window.api.runRaw({ args: argv, interactive })
-
-    setRunning(false)
-    if (result.ok) {
-      setOutput(result.data || t('console.noOutput'))
-      select(result.taskId)
-    } else {
+    try {
+      const result = await window.api.runRaw({ args: argv, interactive })
+      if (result.ok) {
+        setOutput(result.data || t('console.noOutput'))
+        select(result.taskId)
+      } else {
+        setOutput('')
+        setError({ message: result.error, code: result.code })
+        select(result.taskId)
+      }
+    } catch (error) {
+      // Bridge-level rejection: show it instead of stranding the Run button.
       setOutput('')
-      setError({ message: result.error, code: result.code })
-      select(result.taskId)
+      setError({ message: String(error), code: null })
+    } finally {
+      setRunning(false)
     }
   }
 

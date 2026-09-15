@@ -227,4 +227,34 @@ describe('packageFileName', () => {
   it('omits empty components', () => {
     expect(packageFileName('', 0, '1.0', '')).toBe('1.0.ipa')
   })
+
+  it('neutralises path traversal inside a user-supplied version (M11)', () => {
+    const name = packageFileName('com.example.app', 42, '../../etc/passwd', 'iphone')
+    expect(name).not.toContain('/')
+    expect(name).not.toContain('\\')
+    expect(name.endsWith('.ipa')).toBe(true)
+    // No component may start with dots after sanitisation.
+    expect(name).toBe('com.example.app_42__.._etc_passwd.ipa')
+  })
+
+  it('neutralises windows separators and leading dots', () => {
+    const name = packageFileName('com.example.app', 42, '..\\..\\windows\\system32', 'iphone')
+    expect(name).not.toContain('\\')
+    expect(name).not.toContain('/')
+    const dotted = packageFileName('', 0, '.hidden', 'macos')
+    expect(dotted.startsWith('.')).toBe(false)
+    expect(dotted.endsWith('.pkg')).toBe(true)
+  })
+
+  it('sanitises a hostile bundleID too', () => {
+    const name = packageFileName('../../../evil', 0, '1.0', 'iphone')
+    expect(name).not.toContain('/')
+    expect(name.startsWith('.')).toBe(false)
+  })
+
+  it('keeps legitimate semver build metadata intact', () => {
+    expect(packageFileName('com.x', 1, '1.0.0-rc1+build.42', 'iphone')).toBe(
+      'com.x_1_1.0.0-rc1+build.42.ipa'
+    )
+  })
 })

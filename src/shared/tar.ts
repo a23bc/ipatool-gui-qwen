@@ -36,23 +36,52 @@ function readString(buffer: Uint8Array, offset: number, length: number): string 
 }
 
 function decodeUtf8(bytes: Uint8Array): string {
-  if (typeof TextDecoder !== 'undefined') return new TextDecoder('utf-8').decode(bytes)
-  // Node fallback (TextDecoder is global in Node >= 11, but be defensive).
-  return Buffer.from(bytes).toString('utf8')
+  // TextDecoder is a web standard available in every runtime this shared
+  // module can be imported from (Node >= 11, browsers, workers). Deliberately
+  // no `Buffer` fallback: shared code must stay free of Node-only globals.
+  if (typeof TextDecoder === 'undefined') {
+    throw new Error('TextDecoder is unavailable in this environment')
+  }
+  return new TextDecoder('utf-8').decode(bytes)
+}
+
+/**
+ * Pure-string path safety check (no Node `path` dependency, so this stays
+ * isomorphic). Returns the normalized relative name, or null when the entry
+ * must be rejected: absolute paths (Unix or Windows) and `..` traversal are
+ * exactly what a malicious archive uses to write outside the destination
+ * directory. Rejecting at the parser means every future consumer of
+ * `parseTar` inherits the protection instead of having to remember it.
+ */
+export function safeName(name: string): string | null {
+  if (!name) return null
+  // Reject absolute paths: POSIX "/", Windows "\" or drive letters ("C:").
+  if (/^([/\\]|[a-zA-Z]:)/.test(name)) return null
+  const normalized = name.replace(/\\/g, '/').replace(/^\.\//, '')
+  // Reject parent-directory traversal, in any position.
+  if (/(^|\/)\.\.(\/|$)/.test(normalized)) return null
+  return normalized
 }
 
 /** Parses an octal field, including GNU's base-256 extension for huge sizes. */
 function readNumber(buffer: Uint8Array, offset: number, length: number): number {
   if (length <= 0) return 0
-  const first = buffer[offset]
+  const first = buffer[offset] ?? 0
   if (first & 0x80) {
-    // Base-256: big-endian, sign bit in the first byte.
-    let value = first & 0x40 ? -1 : 0
-    for (let i = 0; i < length; i += 1) {
-      value = value * 256 + buffer[offset + i]
+    // GNU base-256 encoding. 0xff marks a negative value stored as two's
+    // complement across the whole field; 0x80 marks a positive value whose
+    // magnitude lives in the REMAINING bytes (including the marker byte in
+    // the accumulation would inflate every positive size astronomically).
+    if (first === 0xff) {
+      let value = 0
+      for (let i = 0; i < length; i += 1) {
+        value = value * 256 + (buffer[offset + i] ?? 0)
+      }
+      return value - 256 ** length
     }
-    if (first & 0x40) {
-      value -= 256 ** length
+    let value = 0
+    for (let i = 1; i < length; i += 1) {
+      value = value * 256 + (buffer[offset + i] ?? 0)
     }
     return value
   }
@@ -168,19 +197,27 @@ export function parseTar(input: Uint8Array): TarEntry[] {
       continue
     }
 
-    let name = longName ?? paxPath ?? (prefix ? `${prefix}/${rawName}` : rawName)
+    const name = longName ?? paxPath ?? (prefix ? `${prefix}/${rawName}` : rawName)
     const link = longLink ?? linkName
 
     longName = null
     longLink = null
     paxPath = null
 
-    if (name === '') continue
+    // Reject malicious entry names (absolute paths, `..` traversal) at the
+    // source. The offset has already been advanced past this entry's data
+    // blocks, so skipping it keeps the rest of the archive parseable.
+    const safe = safeName(name)
+    if (safe === null) continue
+    // A symlink/hardlink target escaping the extraction root is the other half
+    // of a traversal attack; refuse the entry that carries it too.
+    if (link !== '' && safeName(link) === null) continue
 
     const type = typeFor(typeFlag)
     entries.push({
-      // Strip a leading "./" so consumers can match on plain relative paths.
-      name: name.replace(/^\.\//, ''),
+      // safeName() has already stripped a leading "./" and normalized
+      // separators, so consumers can match on plain relative paths.
+      name: safe,
       type,
       size: type === 'file' ? size : 0,
       mode,

@@ -14,13 +14,17 @@ export interface Semver {
 }
 
 export function parseSemver(input: string): Semver | null {
-  const match = input.trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)(?:[-.](.+))?$/)
+  // Strip a leading 'v' and any build metadata: per the semver spec `+...`
+  // does not affect precedence (1.0.0+build.42 == 1.0.0), so it must never
+  // make an otherwise-valid version unparseable.
+  const cleaned = input.trim().replace(/^v/i, '').replace(/\+.*$/, '')
+  const match = cleaned.match(/^(\d+)\.(\d+)\.(\d+)(?:[-.]([0-9A-Za-z.-]+))?$/)
   if (!match) return null
   return {
     major: Number(match[1]),
     minor: Number(match[2]),
     patch: Number(match[3]),
-    prerelease: match[4] ? match[4].split(/[.-]/) : []
+    prerelease: match[4] ? match[4].split(/[.-]/).filter(Boolean) : []
   }
 }
 

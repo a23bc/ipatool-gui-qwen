@@ -3,7 +3,11 @@
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["vite/client", "node"]
+    // The renderer runs sandboxed with nodeIntegration off: NO Node types here.
+    // Including "node" let renderer code typecheck against process/Buffer/__dirname
+    // that do not exist at runtime - a false sense of safety. Anything Node-side
+    // belongs behind the preload bridge. (Scripts/main use tsconfig.node.json.)
+    "types": ["vite/client"]
   },
   "include": ["src/renderer/src", "src/shared"]
 }

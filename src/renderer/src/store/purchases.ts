@@ -72,11 +72,19 @@ export const usePurchasesStore = create<PurchasesState>()((set, get) => ({
     const settings = useAppStore.getState().settings
     set({ loading: true, error: null })
 
-    const result = await window.api.listPurchases({
-      page,
-      maxResults: settings.purchasesPageSize,
-      platform: get().platform || undefined
-    })
+    let result
+    try {
+      result = await window.api.listPurchases({
+        page,
+        maxResults: settings.purchasesPageSize,
+        platform: get().platform || undefined
+      })
+    } catch (error) {
+      // Same contract as search.run: an IPC rejection must roll the loading
+      // state back instead of leaving the view spinning forever.
+      set({ loading: false, error: { message: String(error), hint: null, code: null } })
+      return
+    }
 
     if (!result.ok) {
       set({
@@ -133,6 +141,10 @@ export const usePurchasesStore = create<PurchasesState>()((set, get) => ({
       loadedPages: [],
       page: 1,
       totalCount: 0,
+      // The previous account's storefront/platform choice must not leak into
+      // the next one: reset() runs on profile switch, and querying the new
+      // session with the old platform can legitimately return zero results.
+      platform: useAppStore.getState().settings.defaultPlatform,
       filter: '',
       selection: [],
       loading: false,

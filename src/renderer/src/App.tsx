@@ -56,7 +56,6 @@ export function App(): ReactNode {
   const initTasks = useTasksStore((state) => state.init)
   const view = useUiStore((state) => state.view)
   const setView = useUiStore((state) => state.setView)
-  const setPaletteOpen = useUiStore((state) => state.setPaletteOpen)
   const versionsFor = useUiStore((state) => state.versionsFor)
 
   // Boot the stores. Each store guards against double-initialisation, so this is
@@ -94,14 +93,10 @@ export function App(): ReactNode {
     return () => window.removeEventListener('keydown', onKey)
   }, [setView])
 
-  // Escape closes the drawer even when focus is elsewhere.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape' && !useUiStore.getState().paletteOpen) setPaletteOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [setPaletteOpen])
+  // (No global Escape handler here on purpose: it used to call
+  // setPaletteOpen(false) only when the palette was already closed - a no-op.
+  // The overlays that need Escape each own a handler: Modal captures it at the
+  // document level, CommandPalette and VersionsDrawer listen on window.)
 
   if (!ready) {
     return (

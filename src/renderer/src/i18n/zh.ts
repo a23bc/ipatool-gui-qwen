@@ -292,13 +292,13 @@ export const zh: Dict = {
 
   /* ---------------- console ---------------- */
   'console.title': '命令行',
-  'console.subtitle': '直接运行 ipatool，参数由你决定',
+  'console.subtitle': '直接运行只读的 ipatool 命令，参数由你决定',
   'console.placeholder': 'search telegram --limit 5',
   'console.run': '运行',
   'console.running': '运行中…',
   'console.interactive': '交互模式（会渲染下载进度条）',
   'console.hint':
-    '参数原样传给 ipatool；除非开启交互模式，否则会自动追加 --format json 和 --non-interactive。--verbose 等全局开关取自设置。',
+    '仅允许只读子命令（search、list-versions、list-purchases、get-version-metadata、auth info）；登录、下载与购买请走对应的界面功能。参数原样传给 ipatool；除非开启交互模式，否则会自动追加 --format json 和 --non-interactive。--verbose 等全局开关取自设置。',
   'console.examples': '示例',
   'console.output': '输出',
   'console.noOutput': '暂无输出。',
@@ -332,7 +332,7 @@ export const zh: Dict = {
   'settings.engine.uninstallHelp': '只删除本程序自己下载的那一份。',
   'settings.engine.mirror': 'GitHub 下载镜像',
   'settings.engine.mirrorHelp':
-    '会作为前缀拼到 github.com 地址前（版本元数据与下载都走它），例如 https://gh-proxy.com。留空表示直连。',
+    '会作为前缀拼到 github.com 地址前（版本元数据与资源下载走它），例如 https://gh-proxy.com。.sha256sum 校验文件始终直连 github.com 获取，镜像永远无法为自己的产物背书。留空表示直连。',
   'settings.engine.mirrorPlaceholder': 'https://gh-proxy.com',
   'settings.engine.info': '路径信息',
 

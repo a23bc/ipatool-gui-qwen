@@ -46,6 +46,14 @@ export interface QueueState {
 }
 
 let subscriptionsActive = false
+let disposers: Array<() => void> = []
+
+/** Detaches the queue's IPC listeners (HMR teardown / unit tests). */
+export function disposeQueueStore(): void {
+  for (const dispose of disposers) dispose()
+  disposers = []
+  subscriptionsActive = false
+}
 
 export const useQueueStore = create<QueueState>()((set, get) => ({
   items: [],
@@ -67,7 +75,7 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
     if (subscriptionsActive) return
     subscriptionsActive = true
 
-    window.api.on('queue:snapshot', (next) => {
+    disposers.push(window.api.on('queue:snapshot', (next) => {
       const merged = mergeSnapshot(get().items, next.items)
       set({
         items: merged.items,
@@ -83,9 +91,9 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
           if (!alive.has(previous.id)) progressBus.forget(previous.id)
         }
       }
-    })
+    }))
 
-    window.api.on('queue:progress', (event) => {
+    disposers.push(window.api.on('queue:progress', (event) => {
       progressBus.publish(event.id, {
         received: event.received,
         total: event.total,
@@ -93,9 +101,9 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
         speed: event.speed,
         etaSec: event.etaSec
       })
-    })
+    }))
 
-    window.api.on('queue:item-finished', (item) => {
+    disposers.push(window.api.on('queue:item-finished', (item) => {
       const { t } = useAppStore.getState()
       if (item.state === 'done') {
         useUiStore.getState().toast({
@@ -115,7 +123,7 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
           detail: item.error?.message
         })
       }
-    })
+    }))
   },
 
   async enqueue(requests) {
@@ -140,12 +148,11 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
   },
 
   async clearFinished() {
-    const before = get().items.map((item) => item.id)
     await window.api.clearFinished()
-    const alive = new Set(get().items.map((item) => item.id))
-    for (const id of before) {
-      if (!alive.has(id)) progressBus.forget(id)
-    }
+    // No local progressBus cleanup here: `get().items` is still the pre-clear
+    // snapshot at this point, so the old "forget dead ids" loop could never
+    // see a difference. The queue:snapshot handler's structureChanged branch
+    // already forgets every removed item once the real snapshot arrives.
   },
 
   async setConcurrency(value) {
@@ -193,6 +200,12 @@ export const useQueueStore = create<QueueState>()((set, get) => ({
       void window.api.reveal(item.outputPath)
       return
     }
-    if (target) void window.api.openPath(target)
+    if (target) {
+      // The main process now refuses paths outside its allow-list; surface a
+      // rejection instead of dropping an unhandled promise on the floor.
+      window.api.openPath(target).catch((error: unknown) => {
+        useUiStore.getState().toast({ kind: 'error', message: String(error) })
+      })
+    }
   }
 }))

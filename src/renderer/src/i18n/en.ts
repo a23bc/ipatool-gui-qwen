@@ -298,13 +298,13 @@ export const en = {
 
   /* ---------------- console ---------------- */
   'console.title': 'Console',
-  'console.subtitle': 'Run ipatool directly, with the flags you choose',
+  'console.subtitle': 'Run read-only ipatool commands, with the flags you choose',
   'console.placeholder': 'search telegram --limit 5',
   'console.run': 'Run',
   'console.running': 'Running…',
   'console.interactive': 'Interactive mode (renders the download progress bar)',
   'console.hint':
-    'Arguments are passed to ipatool as-is; --format json and --non-interactive are added automatically unless interactive mode is on. Global flags such as --verbose are appended from Settings.',
+    'Only read-only subcommands are allowed (search, list-versions, list-purchases, get-version-metadata, auth info); sign-in, downloads and purchases go through the dedicated UI. Arguments are passed to ipatool as-is; --format json and --non-interactive are added automatically unless interactive mode is on. Global flags such as --verbose are appended from Settings.',
   'console.examples': 'Examples',
   'console.output': 'Output',
   'console.noOutput': 'No output yet.',
@@ -338,7 +338,7 @@ export const en = {
   'settings.engine.uninstallHelp': 'Only deletes the copy this app downloaded.',
   'settings.engine.mirror': 'GitHub download mirror',
   'settings.engine.mirrorHelp':
-    'Prefix prepended to github.com URLs (release metadata AND downloads), for proxies such as https://gh-proxy.com. Leave empty for a direct connection.',
+    'Prefix prepended to github.com URLs (release metadata and asset downloads), for proxies such as https://gh-proxy.com. The .sha256sum checksum is ALWAYS fetched from github.com directly, so a mirror can never vouch for its own payload. Leave empty for a direct connection.',
   'settings.engine.mirrorPlaceholder': 'https://gh-proxy.com',
   'settings.engine.info': 'Paths',
 

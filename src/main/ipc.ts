@@ -18,13 +18,16 @@ import type {
   Operation,
   OperationFailure,
   QueueItem,
+  RawRunRequest,
   Settings
 } from '../shared/types'
-import type { ProfileView } from '../shared/ipc'
+import type { ProfileView, QueueAction } from '../shared/ipc'
 import { IPC } from '../shared/ipc'
 import { quoteCommand } from '../shared/format'
 import { redactArgs } from '../shared/redact'
 import { parseImportList } from '../shared/import'
+import { notificationBody } from '../shared/notifications'
+import { expandUserPath } from './paths'
 import { ApiError, ipatoolApi } from './api'
 import { artworkCache } from './artwork'
 import { downloadQueue } from './queue'
@@ -73,9 +76,42 @@ function wrap<T>(fn: () => Promise<T>): Promise<Operation<T>> {
   )
 }
 
+/** File extensions the renderer may ask `shell.openPath` about. */
+const OPENABLE_FILE = /\.(ipa|pkg|txt|log)$/i
+
+/** True when `resolved` is `root` itself or lives inside it. */
+function isInsideRoot(resolved: string, root: string): boolean {
+  return resolved === root || resolved.startsWith(root + path.sep)
+}
+
+/**
+ * Runtime mirror of the shared `QueueAction` union, validated on the main side
+ * because IPC payloads are untyped at runtime.
+ */
+const QUEUE_ACTIONS: ReadonlySet<string> = new Set<QueueAction>([
+  'pause',
+  'resume',
+  'cancel',
+  'retry',
+  'remove',
+  'move-up',
+  'move-down',
+  'open',
+  'reveal',
+  'copy-path'
+])
+
+/** Read-only ipatool subcommands the raw console may run (see IPC.RunRaw). */
+const RAW_ALLOWED_SUBCOMMANDS = new Set(['search', 'list-versions', 'list-purchases', 'get-version-metadata'])
+const RAW_ALLOWED_AUTH_SUBCOMMANDS = new Set(['info'])
+
+function rawFailure(message: string): OperationFailure {
+  return { ok: false, error: message, hint: null, code: 'bad-request', taskId: '', exitCode: null }
+}
+
 function mainWindow(): BrowserWindow | null {
   const windows = BrowserWindow.getAllWindows()
-  return windows.length > 0 ? windows[0] : null
+  return windows[0] ?? null
 }
 
 function appInfo(): AppInfoPayload {
@@ -170,11 +206,10 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.ProfilesSetStateDir, (_e, id: string, dir: string) => {
     const profile = profiles.get(String(id))
     if (!profile) return profileViews()
-    // Direct mutation through the settings store keeps one persistence path.
     const next = profiles.list().map((p) => (p.id === id ? { ...p, stateDir: String(dir ?? '') } : p))
-    settingsStore.override({ ...settingsStore.getInternal(), profiles: next })
-    void settingsStore.persistNow()
-    settingsStore.emitChange()
+    // Go through update() so the new list passes normalizeSettings/coerceProfile
+    // like every other write; override() + persistNow() bypassed validation.
+    settingsStore.update({ profiles: next })
     return profileViews()
   })
 
@@ -303,7 +338,13 @@ export function registerIpc(): void {
     return downloadQueue.enqueue(items)
   })
 
-  ipcMain.handle(IPC.QueueControl, (_e, id: string, action: string) => downloadQueue.control(String(id), String(action)))
+  ipcMain.handle(IPC.QueueControl, (_e, id: string, action: string) => {
+    const requested = String(action ?? '')
+    // The preload contract types this as QueueAction, but types do not exist at
+    // runtime: validate against the same union before handing it to the queue.
+    if (!QUEUE_ACTIONS.has(requested as QueueAction)) return
+    return downloadQueue.control(String(id), requested)
+  })
 
   ipcMain.handle(IPC.QueueClearFinished, () => downloadQueue.clearFinished())
 
@@ -374,7 +415,38 @@ export function registerIpc(): void {
     if (typeof target === 'string' && target !== '') shell.showItemInFolder(target)
   })
 
-  ipcMain.handle(IPC.FsOpenPath, (_e, target: string) => shell.openPath(String(target ?? '')))
+  ipcMain.handle(IPC.FsOpenPath, async (_e, target: string) => {
+    const raw = String(target ?? '').trim()
+    if (raw === '') throw new Error('No path given')
+    const resolved = path.resolve(expandUserPath(raw))
+
+    // shell.openPath launches executables, so a compromised renderer must
+    // never be able to point it at an arbitrary file. Only paths the app
+    // plausibly owns are allowed: the download directory, our userData, or a
+    // queue item's output directory - and inside those, only package/log files
+    // or directories (opening a folder in the file manager is harmless).
+    const roots = [
+      settingsStore.getInternal().downloadDir,
+      app.getPath('userData'),
+      ...downloadQueue.snapshot().items.map((item) => item.outputDir)
+    ]
+      .filter((dir): dir is string => typeof dir === 'string' && dir.trim() !== '')
+      .map((dir) => path.resolve(expandUserPath(dir)))
+    if (!roots.some((root) => isInsideRoot(resolved, root))) {
+      throw new Error('Refused to open a path outside the download / userData directories')
+    }
+
+    let isDirectory = false
+    try {
+      isDirectory = (await stat(resolved)).isDirectory()
+    } catch {
+      // A missing file falls through to openPath, which reports it readably.
+    }
+    if (!isDirectory && !OPENABLE_FILE.test(resolved)) {
+      throw new Error('Refused to open a file with a disallowed extension')
+    }
+    return shell.openPath(resolved)
+  })
 
   ipcMain.handle(IPC.FsExists, async (_e, target: string) => {
     try {
@@ -448,17 +520,31 @@ export function registerIpc(): void {
    * raw console
    * ---------------------------------------------------------------- */
 
-  ipcMain.handle(IPC.RunRaw, (_e, request: { args: string[]; interactive?: boolean }) => {
+  ipcMain.handle(IPC.RunRaw, (_e, request: RawRunRequest) => {
     const args = Array.isArray(request?.args) ? request.args.map(String) : []
     if (args.length === 0) {
-      return Promise.resolve({
-        ok: false as const,
-        error: 'No arguments given',
-        hint: null,
-        code: 'bad-request',
-        taskId: '',
-        exitCode: null
-      })
+      return Promise.resolve(rawFailure('No arguments given'))
+    }
+    // Confused-deputy guard: the raw console is a passthrough for *read-only*
+    // commands. Write-side subcommands (auth login/revoke, download --purchase,
+    // purchase) must use their dedicated IPC channels, which carry 2FA
+    // handling, profile scoping and credential storage. Without this, a
+    // compromised renderer could sign the machine into an attacker's Apple ID
+    // or buy apps on the user's account.
+    const sub = args[0] ?? ''
+    if (sub === 'auth') {
+      const authSub = args[1] ?? ''
+      if (!RAW_ALLOWED_AUTH_SUBCOMMANDS.has(authSub)) {
+        return Promise.resolve(
+          rawFailure(
+            `Refused: 'auth ${authSub || '...'}' must use the dedicated sign-in / sign-out controls, not the raw console`
+          )
+        )
+      }
+    } else if (!RAW_ALLOWED_SUBCOMMANDS.has(sub)) {
+      return Promise.resolve(
+        rawFailure(`Refused: subcommand '${sub}' is not allowed in the raw console (read-only commands only)`)
+      )
     }
     return wrap(() => ipatoolApi.runRaw(args, request?.interactive === true))
   })
@@ -488,16 +574,16 @@ export function applySettings(settings: Settings): void {
 /** Profiles annotated with active flag, resolved directory and password state. */
 async function profileViews(): Promise<ProfileView[]> {
   const activeId = profiles.active().id
-  const views: ProfileView[] = []
-  for (const profile of profiles.list()) {
-    views.push({
+  // Parallel: the per-profile credential lookup is independent I/O, and this
+  // helper sits in the hot path of ~11 IPC handlers.
+  return Promise.all(
+    profiles.list().map(async (profile): Promise<ProfileView> => ({
       ...profile,
       active: profile.id === activeId,
       dir: profiles.dirFor(profile),
       hasPassword: await credentials.has(profile.id)
-    })
-  }
-  return views
+    }))
+  )
 }
 
 /** Re-reads the active profile's session and broadcasts it. */
@@ -543,12 +629,6 @@ export function registerEventForwarding(): void {
     broadcast('system:theme', nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
     syncTitleBarOverlay(mainWindow())
   })
-}
-
-/** Extracted so the notification body stays testable. */
-export function notificationBody(item: QueueItem): string {
-  if (item.state === 'done') return `${item.name} finished downloading`
-  return `${item.name} failed: ${item.error?.message ?? 'unknown error'}`
 }
 
 /** Preview of the command the raw console is about to run. */

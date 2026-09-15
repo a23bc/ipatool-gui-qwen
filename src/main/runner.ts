@@ -60,7 +60,12 @@ export interface RunOutcome {
 
 export interface RunningProcess {
   promise: Promise<RunOutcome>
-  kill(): void
+  /**
+   * Terminates the process (tree). `hard` skips the SIGTERM grace period and
+   * goes straight to SIGKILL - used on app quit, where the 2.5 s escalation
+   * timer (unref'd) may never fire.
+   */
+  kill(hard?: boolean): void
   readonly pid: number | null
 }
 
@@ -99,13 +104,16 @@ const PROGRESS_TEXT = /downloading|\d(?:\.\d+)?\s?[kMGTPE]?i?B\s*\/\s*s|\[\s*[=>
  * bar brackets - so it keeps working if any one of them changes. Mis-detection
  * is only ever cosmetic: byte counts come from `onChunk`, not from this flag.
  */
-function isProgressRender(cleaned: string): boolean {
+export function isProgressRender(cleaned: string): boolean {
   if (isJsonLine(cleaned)) return false
   return PROGRESS_TEXT.test(cleaned)
 }
 
-/** Flattens stream output into visual lines, splitting on \r and \n. */
-class LineBuffer {
+/**
+ * Flattens stream output into visual lines, splitting on \r and \n.
+ * Exported for unit tests; production code goes through startProcess().
+ */
+export class LineBuffer {
   private buffer = ''
   private readonly decoder = new StringDecoder('utf8')
   private readonly sink: string[] = []
@@ -175,38 +183,63 @@ export function startProcess(binary: string, options: RunOptions): RunningProces
   let killed = false
   let timedOut = false
   let timer: NodeJS.Timeout | null = null
+  let escalateTimer: NodeJS.Timeout | null = null
 
   const emitLines = (lines: EmitLine[], stream: StreamName): void => {
     if (!options.onLine) return
     for (const line of lines) options.onLine(scrub(line.text), stream, line.progress)
   }
 
-  const killTree = (): void => {
-    if (!child || child.killed || child.pid === undefined) return
+  const killTree = (hard = false): void => {
+    if (!child || child.pid === undefined) return
+    // `child.killed` only means a signal was already delivered, not that the
+    // process exited; a hard kill must still escalate to SIGKILL/taskkill.
+    if (child.killed && !hard) return
     killed = true
     if (isWindows()) {
       execFile(
         'taskkill',
         ['/pid', String(child.pid), '/T', '/F'],
         { windowsHide: true },
-        () => {
-          /* best effort - the exit handler covers the rest */
+        (error) => {
+          // Best effort, but do not silently give up: when taskkill is
+          // unavailable/fails, fall back to a direct kill so the child cannot
+          // survive a cancel.
+          if (error) {
+            try {
+              child?.kill('SIGKILL')
+            } catch {
+              /* the exit handler covers the rest */
+            }
+          }
         }
       )
     } else {
+      if (hard) {
+        // App-quit path: no grace period, the escalation timer would be
+        // dropped with the exiting event loop and orphan the child.
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          /* ignore */
+        }
+        return
+      }
       try {
         child.kill('SIGTERM')
       } catch {
         /* ignore */
       }
       // Escalate if it ignores SIGTERM (e.g. stuck in a syscall).
-      setTimeout(() => {
+      escalateTimer = setTimeout(() => {
+        escalateTimer = null
         try {
           if (child && !child.killed) child.kill('SIGKILL')
         } catch {
           /* ignore */
         }
-      }, 2500).unref?.()
+      }, 2500)
+      escalateTimer.unref?.()
     }
   }
 
@@ -239,6 +272,7 @@ export function startProcess(binary: string, options: RunOptions): RunningProces
 
     child.on('error', (error: Error) => {
       if (timer) clearTimeout(timer)
+      if (escalateTimer) clearTimeout(escalateTimer)
       // ENOENT here means the binary vanished or is not executable.
       stderrBuffer.push(Buffer.from(`failed to start ipatool: ${error.message}\n`, 'utf8'))
       resolve({
@@ -253,6 +287,7 @@ export function startProcess(binary: string, options: RunOptions): RunningProces
 
     child.on('close', (code, signal) => {
       if (timer) clearTimeout(timer)
+      if (escalateTimer) clearTimeout(escalateTimer)
       emitLines(stdoutBuffer.flush(), 'stdout')
       emitLines(stderrBuffer.flush(), 'stderr')
       resolve({

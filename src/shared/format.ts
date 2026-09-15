@@ -4,7 +4,7 @@
  * UI, so numbers always look identical.
  */
 
-const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const
+const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'] as const
 
 /** Formats a byte count using binary units, e.g. 1536 -> "1.5 KB". */
 export function formatBytes(bytes: number | null | undefined, fractionDigits = 1): string {
@@ -96,7 +96,13 @@ export function clampPercent(value: number | null | undefined): number {
 /** Renders an argv array as a shell-ish string, quoting where needed. */
 export function quoteCommand(args: string[]): string {
   return args
-    .map((arg) => (/^[\w./:@=,+-]+$/.test(arg) ? arg : `"${arg.replace(/(["\\$`])/g, '\\$1')}"`))
+    .map((arg) =>
+      /^[\w./:@=,+-]+$/.test(arg)
+        ? arg
+        // Escape the shell metacharacters *and* newlines/tabs, so a multi-line
+        // argument stays on one rendered line instead of breaking the layout.
+        : `"${arg.replace(/(["\\$`])/g, '\\$1').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')}"`
+    )
     .join(' ')
 }
 

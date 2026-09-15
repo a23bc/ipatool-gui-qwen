@@ -85,15 +85,24 @@ export interface EngineStatus {
   download: EngineDownloadProgress | null
 }
 
-export type EngineErrorCode =
-  | 'not-found'
-  | 'download-failed'
-  | 'checksum-mismatch'
-  | 'extract-failed'
-  | 'unsupported-arch'
-  | 'not-executable'
-  | 'network'
-  | null
+/**
+ * Runtime mirror of the engine error codes, so the renderer can validate a
+ * code received over IPC before turning it into an i18n key.
+ *
+ * `null` deliberately lives on {@link EngineStatus.code} (absence of an error),
+ * not inside the code union itself.
+ */
+export const ENGINE_ERROR_CODES = [
+  'not-found',
+  'download-failed',
+  'checksum-mismatch',
+  'extract-failed',
+  'unsupported-arch',
+  'not-executable',
+  'network'
+] as const
+
+export type EngineErrorCode = (typeof ENGINE_ERROR_CODES)[number]
 
 export interface EngineRelease {
   version: string

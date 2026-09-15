@@ -14,6 +14,8 @@ export interface ArtworkState {
   byId: Record<number, string | null>
   request: (appId: number) => void
   invalidate: (appId: number) => void
+  /** Drops every cached icon; mirrors `window.api.clearArtworkCache()`. */
+  invalidateAll: () => void
 }
 
 const inflight = new Set<number>()
@@ -48,6 +50,11 @@ export const useArtworkStore = create<ArtworkState>()((set, get) => ({
       delete next[appId]
       return { byId: next }
     })
+  },
+
+  invalidateAll() {
+    inflight.clear()
+    set({ byId: {} })
   }
 }))
 

@@ -24,7 +24,10 @@ const TOOLS: NavItem[] = [
   { view: 'settings', icon: 'settings', labelKey: 'nav.settings', shortcut: ',' }
 ]
 
-function NavButton({ item }: { item: NavItem }): ReactNode {
+// n-R2: the button list is static; memo keeps a parent re-render (e.g. engine
+// status churn) from re-rendering all six when their own subscriptions are
+// unchanged.
+const NavButton = memo(function NavButton({ item }: { item: NavItem }): ReactNode {
   const view = useUiStore((state) => state.view)
   const setView = useUiStore((state) => state.setView)
   const t = useAppStore((state) => state.t)
@@ -62,7 +65,7 @@ function NavButton({ item }: { item: NavItem }): ReactNode {
       ) : null}
     </button>
   )
-}
+})
 
 function SectionLabel({ children }: { children: ReactNode }): ReactNode {
   return (

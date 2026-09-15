@@ -1,6 +1,7 @@
 import { memo, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import type { QueueItem } from '@shared/types'
+import { IPATOOL_ERROR_CODES } from '@shared/ipatool/errors'
 import type { IconName } from '@renderer/components/Icon'
 import { useAppStore } from '@renderer/store/app'
 import { useQueueStore } from '@renderer/store/queue'
@@ -20,9 +21,16 @@ interface RowProps {
   item: QueueItem
 }
 
-function actionButton(icon: IconName, label: string, onClick: () => void, danger = false): ReactNode {
+function actionButton(
+  key: string,
+  icon: IconName,
+  label: string,
+  onClick: () => void,
+  danger = false
+): ReactNode {
   return (
     <button
+      key={key}
       type="button"
       className="btn btn-ghost btn-icon h-[26px] w-[26px]"
       onClick={onClick}
@@ -74,7 +82,11 @@ const DownloadRow = memo(function DownloadRow({ item }: RowProps): ReactNode {
     }
   }
 
-  const hintKey = item.error?.hint ? `errors.${item.error.hint}.hint` : null
+  // `hint` is IPC data: only build an i18n key from codes that actually exist
+  // in the dictionary, otherwise t() falls back to the raw key literal.
+  const hint = item.error?.hint
+  const hintKey =
+    hint && (IPATOOL_ERROR_CODES as readonly string[]).includes(hint) ? `errors.${hint}.hint` : null
 
   return (
     <div className="row h-full" style={{ borderBottom: 'none' }}>
@@ -115,30 +127,32 @@ const DownloadRow = memo(function DownloadRow({ item }: RowProps): ReactNode {
 
       <div className="flex shrink-0 items-center gap-0.5">
         {busy
-          ? actionButton('pause', t('downloads.action.pause'), () => void control(item.id, 'pause'))
+          ? actionButton('pause', 'pause', t('downloads.action.pause'), () => void control(item.id, 'pause'))
           : null}
 
         {item.state === 'paused' || item.state === 'queued' || item.state === 'canceled'
-          ? actionButton('play', t('downloads.action.resume'), () => void control(item.id, 'resume'))
+          ? actionButton('resume', 'play', t('downloads.action.resume'), () => void control(item.id, 'resume'))
           : null}
 
         {item.state === 'error'
-          ? actionButton('refresh', t('downloads.action.retry'), () => void control(item.id, 'retry'))
+          ? actionButton('retry', 'refresh', t('downloads.action.retry'), () => void control(item.id, 'retry'))
           : null}
 
         {item.state === 'error' || item.state === 'paused'
-          ? actionButton('trash', t('downloads.action.deletePartial'), () => void discardPartial(), true)
+          ? actionButton('delete-partial', 'trash', t('downloads.action.deletePartial'), () => void discardPartial(), true)
           : null}
 
         {item.state === 'done' && item.outputPath
           ? [
-              actionButton('folder', t('downloads.action.reveal'), () =>
+              actionButton('reveal', 'folder', t('downloads.action.reveal'), () =>
                 void window.api.reveal(item.outputPath as string)
               ),
-              actionButton('external', t('downloads.action.open'), () =>
-                void window.api.openPath(item.outputPath as string)
-              ),
-              actionButton('copy', t('downloads.action.copyPath'), () => {
+              actionButton('open', 'external', t('downloads.action.open'), () => {
+                window.api.openPath(item.outputPath as string).catch((error: unknown) => {
+                  toast({ kind: 'error', message: String(error) })
+                })
+              }),
+              actionButton('copy-path', 'copy', t('downloads.action.copyPath'), () => {
                 void window.api.copyText(item.outputPath as string)
                 toast({ kind: 'success', message: t('toast.copied'), duration: 1500 })
               })
@@ -146,12 +160,12 @@ const DownloadRow = memo(function DownloadRow({ item }: RowProps): ReactNode {
           : null}
 
         {item.taskId
-          ? actionButton('activity', t('nav.activity'), () => setView('activity'))
+          ? actionButton('activity', 'activity', t('nav.activity'), () => setView('activity'))
           : null}
 
         {busy
-          ? actionButton('stop', t('downloads.action.cancel'), () => void control(item.id, 'cancel'), true)
-          : actionButton('x', t('downloads.action.remove'), () => void control(item.id, 'remove'), true)}
+          ? actionButton('cancel', 'stop', t('downloads.action.cancel'), () => void control(item.id, 'cancel'), true)
+          : actionButton('remove', 'x', t('downloads.action.remove'), () => void control(item.id, 'remove'), true)}
       </div>
     </div>
   )

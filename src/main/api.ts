@@ -58,6 +58,7 @@ import {
   type ZerologEvent
 } from '../shared/ipatool/parse'
 import { classifyError, shorten, type IpatoolErrorCode } from '../shared/ipatool/errors'
+import { secretValuesFromArgs } from '../shared/redact'
 import { engineManager } from './engine'
 import * as profiles from './profiles'
 import { settingsStore } from './settings'
@@ -129,6 +130,31 @@ export function normalizeApp(raw: unknown): StoreApp | null {
     price: Number.isFinite(price) ? price : 0,
     ...(platforms ? { platforms } : {}),
     ...(purchaseDate ? { purchaseDate } : {})
+  }
+}
+
+/**
+ * Maps an ipatool error code onto the login dialog's next step.
+ *
+ * `passphrase-invalid` maps to `passphrase-required`-style recovery: the user
+ * must re-enter the keychain passphrase, and without this case a wrong
+ * passphrase degraded into a generic 'error' with no actionable prompt.
+ * Exported as a pure function so it is unit-testable without spawning ipatool.
+ */
+export function loginStatusFromCode(code: IpatoolErrorCode): LoginResult['status'] {
+  switch (code) {
+    case 'two-factor-required':
+      return 'needs-2fa'
+    case 'passphrase-required':
+    case 'passphrase-invalid':
+      return 'passphrase-required'
+    case 'bad-credentials':
+    case 'account-locked':
+      return 'bad-credentials'
+    case 'rate-limited':
+      return 'rate-limited'
+    default:
+      return 'error'
   }
 }
 
@@ -241,7 +267,7 @@ export class IpatoolApi {
       }
     })
 
-    taskRegistry.registerCanceller(taskId, () => running.kill())
+    taskRegistry.registerCanceller(taskId, (hard) => running.kill(hard))
 
     const run = await running.promise
     const outcome = buildOutcome(events, textLines)
@@ -369,19 +395,7 @@ export class IpatoolApi {
   }
 
   private loginStatusFromCode(code: IpatoolErrorCode): LoginResult['status'] {
-    switch (code) {
-      case 'two-factor-required':
-        return 'needs-2fa'
-      case 'passphrase-required':
-        return 'passphrase-required'
-      case 'bad-credentials':
-      case 'account-locked':
-        return 'bad-credentials'
-      case 'rate-limited':
-        return 'rate-limited'
-      default:
-        return 'error'
-    }
+    return loginStatusFromCode(code)
   }
 
   async accountInfo(profileId?: string): Promise<AccountInfo> {
@@ -564,7 +578,10 @@ export class IpatoolApi {
       label: `ipatool ${args[0] ?? ''}`.trim(),
       args,
       interactive,
-      timeoutMs: 0
+      timeoutMs: 0,
+      // The console user may type `-p hunter2` themselves; those values are
+      // invisible to the typed API paths, so harvest them for log scrubbing.
+      secrets: secretValuesFromArgs(args)
     })
     const { run } = result
     return [run.stdout, run.stderr].filter((s) => s.trim() !== '').join('\n--- stderr ---\n')

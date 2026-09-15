@@ -60,9 +60,9 @@ export function Modal({
       const focusables = panel.querySelectorAll<HTMLElement>(
         'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
       )
-      if (focusables.length === 0) return
       const first = focusables[0]
       const last = focusables[focusables.length - 1]
+      if (!first || !last) return
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault()
         last.focus()
@@ -73,8 +73,16 @@ export function Modal({
     }
 
     document.addEventListener('keydown', onKeyDown, true)
+
+    // Freeze the page behind the dialog: long modals used to let the main
+    // view scroll underneath (wheel events over the backdrop), which is
+    // disorienting and can shift focus targets mid-interaction.
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
     return () => {
       document.removeEventListener('keydown', onKeyDown, true)
+      document.body.style.overflow = previousOverflow
       previous?.focus?.()
     }
     // Deliberately only `open`: this must run once per open, not per render.
