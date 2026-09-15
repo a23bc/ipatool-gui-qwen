@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LogLine, TaskRecord } from '@shared/types'
 import { formatDuration } from '@shared/format'
@@ -57,14 +57,33 @@ const TaskRow = memo(function TaskRow({
   )
 })
 
-const LogRow = memo(function LogRow({ line }: { line: LogLine }): ReactNode {
+const LogRow = memo(function LogRow({
+  line,
+  selected,
+  onSelect
+}: {
+  line: LogLine
+  selected: boolean
+  onSelect: (line: LogLine) => void
+}): ReactNode {
   return (
-    <div className="log-line flex h-full items-start gap-2 px-3" style={{ color: LEVEL_COLOR[line.level] }}>
+    <button
+      type="button"
+      onClick={() => onSelect(line)}
+      className="log-line flex h-full w-full items-center gap-2 px-3 text-left"
+      style={{
+        color: LEVEL_COLOR[line.level],
+        background: selected ? 'var(--row-selected)' : 'transparent'
+      }}
+      title={line.text.length > 100 ? 'Click to view the full line' : undefined}
+    >
       <span className="shrink-0 tabular-nums" style={{ color: 'var(--text-faint)' }}>
         {new Date(line.t).toISOString().slice(11, 19)}
       </span>
-      <span className="min-w-0 flex-1 break-words">{line.text}</span>
-    </div>
+      {/* Fixed-height virtual rows cannot show wrapped text, so clip to one
+          line; the full content is available in the detail pane below. */}
+      <span className="min-w-0 flex-1 truncate">{line.text}</span>
+    </button>
   )
 })
 
@@ -80,6 +99,9 @@ export function ActivityView(): ReactNode {
   const exportLogs = useTasksStore((state) => state.exportLogs)
   const cancel = useTasksStore((state) => state.cancel)
   const toast = useUiStore((state) => state.toast)
+
+  // The line currently expanded in the detail pane (fixed-height rows clip).
+  const [expanded, setExpanded] = useState<LogLine | null>(null)
 
   const selected = useMemo(
     () => tasks.find((task) => task.id === selectedId) ?? null,
@@ -102,8 +124,15 @@ export function ActivityView(): ReactNode {
     [selectedId, select]
   )
 
+  useEffect(() => {
+    setExpanded(null)
+  }, [selectedId])
+
   const lineKey = useCallback((line: LogLine, index: number) => `${line.t}-${index}`, [])
-  const renderLine = useCallback((line: LogLine) => <LogRow line={line} />, [])
+  const renderLine = useCallback(
+    (line: LogLine) => <LogRow line={line} selected={expanded === line} onSelect={setExpanded} />,
+    [expanded]
+  )
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -226,6 +255,47 @@ export function ActivityView(): ReactNode {
                 <p className="px-4 py-6 text-center text-[12px] faint">{t('console.noOutput')}</p>
               }
             />
+
+            {expanded ? (
+              <div
+                className="flex max-h-[40%] shrink-0 flex-col border-t px-4 py-2"
+                style={{ borderColor: 'var(--border)', background: 'var(--panel)' }}
+              >
+                <div className="mb-1.5 flex shrink-0 items-center gap-2">
+                  <span className="mono faint">{new Date(expanded.t).toISOString()}</span>
+                  <span className="badge">
+                    {expanded.stream}/{expanded.level}
+                  </span>
+                  <div className="ml-auto flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-icon h-[24px] w-[24px]"
+                      title={t('common.copy')}
+                      onClick={() => {
+                        void window.api.copyText(expanded.text)
+                        toast({ kind: 'success', message: t('toast.copied'), duration: 1500 })
+                      }}
+                    >
+                      <Icon name="copy" size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-icon h-[24px] w-[24px]"
+                      title={t('common.close')}
+                      onClick={() => setExpanded(null)}
+                    >
+                      <Icon name="x" size={12} />
+                    </button>
+                  </div>
+                </div>
+                <pre
+                  className="log-line min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded p-2"
+                  style={{ background: 'var(--panel-2)' }}
+                >
+                  {expanded.text}
+                </pre>
+              </div>
+            ) : null}
           </>
         ) : (
           <EmptyState icon="activity" title={t('activity.title')} body={t('activity.subtitle')} />

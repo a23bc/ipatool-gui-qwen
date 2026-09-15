@@ -274,6 +274,14 @@ export interface CommandOutcome {
   successEvent: ZerologEvent | null
   /** The last event carrying `level: "error"` or an `error` field. */
   errorEvent: ZerologEvent | null
+  /**
+   * The last info-level event.
+   *
+   * Needed because not every ipatool command stamps `success: true`: `search`
+   * and `list-purchases` emit only `count`/`apps` (see cmd/search.go and
+   * cmd/purchases.go upstream). For those, the last info event IS the payload.
+   */
+  lastInfoEvent: ZerologEvent | null
   /** Non-JSON lines (prompts, human text), in order. */
   textLines: string[]
 }
@@ -281,11 +289,13 @@ export interface CommandOutcome {
 export function buildOutcome(events: ZerologEvent[], textLines: string[]): CommandOutcome {
   let successEvent: ZerologEvent | null = null
   let errorEvent: ZerologEvent | null = null
+  let lastInfoEvent: ZerologEvent | null = null
   for (const event of events) {
     if (event.success === true) successEvent = event
     if (event.level === 'error' || typeof event.error === 'string') errorEvent = event
+    if (event.level === 'info' || event.level === undefined) lastInfoEvent = event
   }
-  return { events, successEvent, errorEvent, textLines }
+  return { events, successEvent, errorEvent, lastInfoEvent, textLines }
 }
 
 /** Reads the `apps` array out of a search / list-purchases success event. */

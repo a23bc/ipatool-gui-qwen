@@ -222,14 +222,24 @@ export class IpatoolApi {
     return { outcome, run, taskId }
   }
 
-  /** Throws ApiError when the invocation did not produce a success event. */
+  /**
+   * Throws ApiError when the invocation failed, otherwise returns the event
+   * carrying the payload.
+   *
+   * Success is decided by exit code + absence of an error event, NOT by a
+   * `success: true` field: upstream `search` and `list-purchases` never stamp
+   * one, so relying on it turned successful searches into errors.
+   */
   private assertSuccess(result: ExecuteResult, context: string): ZerologEvent {
     const { outcome, run, taskId } = result
-    if (outcome.successEvent) return outcome.successEvent
+    const failed = run.code !== 0 || outcome.errorEvent !== null
+    if (!failed) return outcome.successEvent ?? outcome.lastInfoEvent ?? {}
 
+    // NOTE: run.stdout/run.stderr are strings; they must be array elements,
+    // not spread (spreading a string yields its characters).
     const errorText = outcome.errorEvent?.error
       ? String(outcome.errorEvent.error)
-      : [...run.stderr, ...run.stdout, ...outcome.textLines].filter(Boolean).join('\n')
+      : [run.stderr, run.stdout, ...outcome.textLines].filter((part) => part && part.trim() !== '').join('\n')
 
     const classified = classifyError(errorText || `ipatool exited with code ${run.code}`)
     throw new ApiError(

@@ -28,21 +28,32 @@ export function Modal({
 }: ModalProps): ReactNode {
   const panelRef = useRef<HTMLDivElement>(null)
 
+  // Callers pass a fresh arrow function every render; keeping it in a ref lets
+  // the focus/trap effect depend on `open` alone. Depending on the prop made the
+  // effect re-run on every keystroke of a controlled input inside the dialog,
+  // which yanked focus onto the header's close button each time.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
     if (!open) return
 
     const previous = document.activeElement as HTMLElement | null
     const panel = panelRef.current
 
-    // Focus the first field so typing works immediately.
+    // Focus the first *field*, never dialog chrome: the header close button
+    // precedes the body in DOM order, so a generic "first focusable" query
+    // would target it instead of the input the user is meant to type in.
     const focusTarget =
-      panel?.querySelector<HTMLElement>('input:not([type=hidden]), textarea, select, button') ?? panel
+      panel?.querySelector<HTMLElement>('input:not([type=hidden]), textarea, select') ??
+      panel?.querySelector<HTMLElement>('footer button') ??
+      panel
     focusTarget?.focus()
 
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         event.stopPropagation()
-        onClose()
+        onCloseRef.current()
         return
       }
       if (event.key !== 'Tab' || !panel) return
@@ -66,7 +77,8 @@ export function Modal({
       document.removeEventListener('keydown', onKeyDown, true)
       previous?.focus?.()
     }
-  }, [open, onClose])
+    // Deliberately only `open`: this must run once per open, not per render.
+  }, [open])
 
   if (!open) return null
 

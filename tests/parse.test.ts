@@ -10,6 +10,7 @@ import {
   parseSha256Sum,
   parseVersion,
   readApps,
+  readNumber,
   readStringArray,
   splitStreamSegments,
   stripAnsi,
@@ -227,6 +228,27 @@ describe('zerolog parsing', () => {
     const outcome = buildOutcome(events, [])
     expect(outcome.successEvent).toBeNull()
     expect(outcome.errorEvent!.error).toBe('license is required')
+  })
+
+  it('exposes the last info event as payload fallback', () => {
+    // Upstream `search` / `list-purchases` never stamp success:true, so the
+    // payload must be recoverable from the last info-level event.
+    const events = [
+      parseJsonLine(
+        '{"level":"info","count":2,"apps":[{"id":1,"bundleID":"com.a","name":"A","version":"1","price":0},{"id":2,"bundleID":"com.b","name":"B","version":"2","price":0}]}'
+      )!
+    ]
+    const outcome = buildOutcome(events, [])
+    expect(outcome.successEvent).toBeNull()
+    expect(outcome.errorEvent).toBeNull()
+    expect(outcome.lastInfoEvent).not.toBeNull()
+    expect(readApps(outcome.lastInfoEvent)).toHaveLength(2)
+    expect(readNumber(outcome.lastInfoEvent, 'count')).toBe(2)
+  })
+
+  it('keeps lastInfoEvent null when only errors were emitted', () => {
+    const outcome = buildOutcome([parseJsonLine('{"level":"error","error":"boom"}')!], [])
+    expect(outcome.lastInfoEvent).toBeNull()
   })
 
   it('reads string arrays such as externalVersionIdentifiers', () => {
