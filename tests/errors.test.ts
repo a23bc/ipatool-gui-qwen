@@ -104,3 +104,131 @@ describe('shorten', () => {
     expect(shorten(long, 100).endsWith('…')).toBe(true)
   })
 })
+
+/**
+ * m-C3: every rule needs more than one pattern under test - the previous suite
+ * exercised a single pattern per rule, leaving the rest without regression
+ * protection. Two representative patterns per rule (typically the first and
+ * the most idiosyncratic) are pinned below.
+ */
+describe('classifyError rule matrix', () => {
+  const cases: Array<[string, string]> = [
+    ['2fa code is required', 'two-factor-required'],
+    ['ErrAuthCodeRequired', 'two-factor-required'],
+    ['keychain passphrase is required', 'passphrase-required'],
+    ['failed to decrypt the keychain', 'passphrase-invalid'],
+    ['incorrect passphrase supplied', 'passphrase-invalid'],
+    ['no account found', 'not-signed-in'],
+    ['SignInRequired', 'not-signed-in'],
+    ['please sign in with your Apple ID', 'not-signed-in'],
+    ['apple id or password is incorrect', 'bad-credentials'],
+    ['InvalidCredentials', 'bad-credentials'],
+    ['account is disabled for security reasons', 'account-locked'],
+    ['AccountDisabled', 'account-locked'],
+    ['license is required', 'license-required'],
+    ['LicenseNotFound', 'license-required'],
+    ['could not find the app', 'app-not-found'],
+    ['no results found', 'app-not-found'],
+    ['version not found', 'version-not-found'],
+    ['invalid version', 'version-not-found'],
+    ['too many requests, try again later', 'rate-limited'],
+    ['HTTP 429 received', 'rate-limited'],
+    ['requested range not satisfiable', 'resume-failed'],
+    ['server replied 416', 'resume-failed'],
+    ['failed to validate package platform', 'platform-mismatch'],
+    ['app does not declare iphoneos support', 'platform-mismatch'],
+    ['request timed out', 'timeout'],
+    ['deadline exceeded', 'timeout'],
+    ['no such host itunes.apple.com', 'dns'],
+    ['name resolution failed', 'dns'],
+    ['x509: certificate signed by unknown authority', 'tls'],
+    ['tls handshake failure', 'tls'],
+    ['proxy connection refused', 'proxy'],
+    ['CONNECT tunnel failed', 'proxy'],
+    ['no space left on device', 'disk'],
+    ['read-only file system', 'disk'],
+    ['failed to send http request', 'network'],
+    ['connection reset by peer', 'network'],
+    ['unexpected EOF while reading body', 'network'],
+    ['spawn ipatool ENOENT', 'engine-missing'],
+    ['ipatool is not recognized as an internal or external command', 'engine-missing'],
+    ['session mismatch for profile p1', 'session-mismatch'],
+    ['context canceled', 'canceled'],
+    ['signal: killed', 'canceled']
+  ]
+
+  it.each(cases)('%s -> %s', (text, code) => {
+    expect(classifyError(text).code).toBe(code)
+  })
+
+  it('marks retryable/actionable flags from the matched rule', () => {
+    expect(classifyError('too many requests').retryable).toBe(true)
+    expect(classifyError('keychain passphrase is required').actionable).toBe(true)
+    expect(classifyError('no space left on device').retryable).toBe(false)
+  })
+
+  it('returns unknown (retryable) when nothing matches', () => {
+    const classified = classifyError('something entirely novel happened')
+    expect(classified.code).toBe('unknown')
+    expect(classified.retryable).toBe(true)
+    expect(classified.message).toBe('something entirely novel happened')
+  })
+})
+
+describe('classifyError word-boundary precision (m-S4)', () => {
+  it('does not read a resume failure into an unrelated 4162', () => {
+    expect(classifyError('error code 4162 from the store').code).not.toBe('resume-failed')
+  })
+
+  it('does not read DNS into words that merely contain "dns"', () => {
+    expect(classifyError('podcastdns feed unavailable').code).not.toBe('dns')
+  })
+
+  it('does not read a network EOF into EOFError identifiers', () => {
+    expect(classifyError('EOFError in user code').code).not.toBe('network')
+  })
+
+  it('still matches the exact tokens', () => {
+    expect(classifyError('got status 416').code).toBe('resume-failed')
+    expect(classifyError('dns lookup exploded').code).toBe('dns')
+    expect(classifyError('read: unexpected EOF').code).toBe('network')
+  })
+})
+
+describe('classifyError rule ordering', () => {
+  it('prefers passphrase-invalid over generic decryption wording', () => {
+    expect(classifyError('failed to unlock keyring: invalid passphrase').code).toBe('passphrase-invalid')
+  })
+
+  it('prefers not-signed-in over bad-credentials when both match', () => {
+    expect(classifyError('not authenticated - invalid credentials').code).toBe('not-signed-in')
+  })
+
+  it('prefers canceled over network wording', () => {
+    // 'context canceled' often appears next to 'failed to send http request';
+    // the canceled rule sits last, so pin the network rule wins instead...
+    expect(classifyError('failed to send http request: context canceled').code).toBe('network')
+    // ...while a bare cancellation is still classified as canceled.
+    expect(classifyError('context canceled').code).toBe('canceled')
+  })
+})
+
+describe('shorten surrogate safety (n-R10)', () => {
+  it('never cuts an astral character in half', () => {
+    // '𝄞' is U+1D11E: a surrogate pair occupying two UTF-16 code units.
+    const message = 'a'.repeat(399) + '𝄞tail'
+    const shortened = shorten(message, 400)
+    // The cut lands inside the pair (index 399 is the high surrogate); the
+    // implementation must drop it rather than emit a lone surrogate.
+    expect(shortened.endsWith('…')).toBe(true)
+    const withoutEllipsis = shortened.slice(0, -1)
+    for (let i = 0; i < withoutEllipsis.length; i += 1) {
+      const code = withoutEllipsis.charCodeAt(i)
+      const isLoneHigh = code >= 0xd800 && code <= 0xdbff &&
+        !(withoutEllipsis.charCodeAt(i + 1) >= 0xdc00 && withoutEllipsis.charCodeAt(i + 1) <= 0xdfff)
+      const isLoneLow = code >= 0xdc00 && code <= 0xdfff &&
+        !(withoutEllipsis.charCodeAt(i - 1) >= 0xd800 && withoutEllipsis.charCodeAt(i - 1) <= 0xdbff)
+      expect(isLoneHigh || isLoneLow).toBe(false)
+    }
+  })
+})

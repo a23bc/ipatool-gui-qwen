@@ -82,6 +82,17 @@ describe('parseImportList', () => {
     expect(entries).toHaveLength(2)
   })
 
+  it('distinguishes different *display* versions of the same app (m-S6)', () => {
+    const entries = parseImportList('com.example.app | Example | 10.5.1\ncom.example.app | Example | 10.5.2')
+    expect(entries).toHaveLength(2)
+    expect(entries.map((e) => e.version)).toEqual(['10.5.1', '10.5.2'])
+  })
+
+  it('still de-duplicates identical rows', () => {
+    const entries = parseImportList('com.example.app | Example | 10.5.1\ncom.example.app | Example | 10.5.1')
+    expect(entries).toHaveLength(1)
+  })
+
   it('returns an empty list for garbage', () => {
     expect(parseImportList('hello\nworld\n')).toEqual([])
   })

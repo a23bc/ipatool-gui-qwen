@@ -99,3 +99,151 @@ describe('findTarFile', () => {
     expect(findTarFile(entries, (base) => base.endsWith('.exe'))).toBeNull()
   })
 })
+
+/* ------------------------------------------------------------------ *
+ * Synthetic archives: path-traversal defence (M9), symlinks, base-256.
+ * ------------------------------------------------------------------ */
+
+import { safeName } from '@shared/tar'
+
+function concat(...parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((sum, part) => sum + part.length, 0)
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const part of parts) {
+    out.set(part, offset)
+    offset += part.length
+  }
+  return out
+}
+
+/** Builds a minimal ustar header block (checksum left blank - not validated). */
+function makeHeader(name: string, size: number, typeFlag: string, linkName = ''): Uint8Array {
+  const block = new Uint8Array(512)
+  const write = (value: string, offset: number, length: number): void => {
+    for (let i = 0; i < value.length && i < length; i += 1) block[offset + i] = value.charCodeAt(i)
+  }
+  write(name, 0, 100)
+  write('0000644\0', 100, 8)
+  write('0000000\0', 108, 8)
+  write('0000000\0', 116, 8)
+  write(size.toString(8).padStart(11, '0') + '\0', 124, 12)
+  write('14503353400\0', 136, 12)
+  write('        ', 148, 8)
+  block[156] = typeFlag.charCodeAt(0)
+  write(linkName, 157, 100)
+  write('ustar\0', 257, 6)
+  write('00', 263, 2)
+  return block
+}
+
+function makeFileEntry(name: string, content: string): Uint8Array {
+  const data = new TextEncoder().encode(content)
+  const padded = new Uint8Array(Math.ceil(data.length / 512) * 512)
+  padded.set(data)
+  return concat(makeHeader(name, data.length, '0'), padded)
+}
+
+function makeSymlinkEntry(name: string, target: string): Uint8Array {
+  return makeHeader(name, 0, '2', target)
+}
+
+const END_BLOCKS = new Uint8Array(1024)
+
+describe('parseTar path-safety (M9)', () => {
+  it('rejects parent-traversal names but keeps parsing the rest', () => {
+    const archive = concat(
+      makeFileEntry('../evil.txt', 'pwned'),
+      makeFileEntry('deep/../../evil2.txt', 'pwned'),
+      makeFileEntry('good/hello.txt', 'hello'),
+      END_BLOCKS
+    )
+    const parsed = parseTar(archive)
+    expect(parsed.map((e) => e.name)).toEqual(['good/hello.txt'])
+    expect(Buffer.from(parsed[0]!.data!).toString('utf8')).toBe('hello')
+  })
+
+  it('rejects absolute paths (POSIX and Windows)', () => {
+    const archive = concat(
+      makeFileEntry('/etc/passwd', 'root:x:0:0'),
+      makeFileEntry('C:\\Windows\\system32\\evil.dll', 'MZ'),
+      makeFileEntry('ok.txt', 'ok'),
+      END_BLOCKS
+    )
+    expect(parseTar(archive).map((e) => e.name)).toEqual(['ok.txt'])
+  })
+
+  it('rejects entries whose symlink target escapes the root', () => {
+    const archive = concat(
+      makeSymlinkEntry('link-out', '../../etc/passwd'),
+      makeSymlinkEntry('link-abs', '/etc/passwd'),
+      makeSymlinkEntry('link-ok', 'sibling/file.txt'),
+      END_BLOCKS
+    )
+    const parsed = parseTar(archive)
+    expect(parsed.map((e) => e.name)).toEqual(['link-ok'])
+    expect(parsed[0]!.type).toBe('symlink')
+    expect(parsed[0]!.linkTarget).toBe('sibling/file.txt')
+  })
+
+  it('rejects a malicious GNU longname payload', () => {
+    const longName = '../../../tmp/evil.bin'
+    const nameData = new TextEncoder().encode(longName + '\0')
+    const padded = new Uint8Array(512)
+    padded.set(nameData)
+    const archive = concat(
+      makeHeader('././@LongLink', nameData.length, 'L'),
+      padded,
+      makeFileEntry('ignored.txt', 'x'), // the header the longname annotates
+      makeFileEntry('safe.txt', 'safe'),
+      END_BLOCKS
+    )
+    const parsed = parseTar(archive)
+    expect(parsed.map((e) => e.name)).toEqual(['safe.txt'])
+  })
+
+  it('normalizes backslash separators and leading "./"', () => {
+    const archive = concat(makeFileEntry('.\\dir\\file.txt', 'x'), END_BLOCKS)
+    const parsed = parseTar(archive)
+    expect(parsed.map((e) => e.name)).toEqual(['dir/file.txt'])
+  })
+})
+
+describe('safeName', () => {
+  it('accepts plain relative names', () => {
+    expect(safeName('bin/ipatool')).toBe('bin/ipatool')
+    expect(safeName('./bin/ipatool')).toBe('bin/ipatool')
+  })
+
+  it('rejects traversal and absolute names', () => {
+    expect(safeName('../x')).toBeNull()
+    expect(safeName('a/../b')).toBeNull()
+    expect(safeName('a/..')).toBeNull()
+    expect(safeName('/x')).toBeNull()
+    expect(safeName('\\x')).toBeNull()
+    expect(safeName('C:\\x')).toBeNull()
+    expect(safeName('')).toBeNull()
+  })
+
+  it('does not false-positive on legitimate names containing dots', () => {
+    expect(safeName('com.example.app_1.0.ipa')).toBe('com.example.app_1.0.ipa')
+    expect(safeName('..hidden/file')).toBe('..hidden/file')
+  })
+})
+
+describe('parseTar base-256 sizes', () => {
+  it('decodes the GNU binary size encoding', () => {
+    const content = 'hello'
+    const block = makeHeader('b256.txt', 0, '0')
+    // Overwrite the size field (offset 124, 12 bytes) with base-256 for 5.
+    block[124] = 0x80
+    for (let i = 125; i < 136; i += 1) block[i] = 0
+    block[135] = content.length
+    const data = new Uint8Array(512)
+    data.set(new TextEncoder().encode(content))
+    const parsed = parseTar(concat(block, data, END_BLOCKS))
+    expect(parsed).toHaveLength(1)
+    expect(parsed[0]!.size).toBe(5)
+    expect(Buffer.from(parsed[0]!.data!).toString('utf8')).toBe('hello')
+  })
+})

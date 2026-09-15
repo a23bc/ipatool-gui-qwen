@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { REDACTION, hasSecretFlag, redactArgs, redactText } from '@shared/redact'
+import { REDACTION, hasSecretFlag, redactArgs, redactText, secretValuesFromArgs } from '@shared/redact'
 
 describe('redactArgs', () => {
   it('masks the Apple ID password', () => {
@@ -37,6 +37,18 @@ describe('redactArgs', () => {
     expect(redactArgs(['auth', 'login', '-p'])).toEqual(['auth', 'login', '-p'])
   })
 
+  it('masks a flag-looking token after a secret flag (pflag consumes it as the value)', () => {
+    // ipatool's parser treats the token after `-p` as the password even when
+    // it starts with a dash, so redaction must swallow it too - over-masking
+    // here exactly mirrors what the child process receives.
+    expect(redactArgs(['auth', 'login', '-p', '--verbose'])).toEqual([
+      'auth',
+      'login',
+      '-p',
+      REDACTION
+    ])
+  })
+
   it('produces a string that contains no secret material', () => {
     const args = ['auth', 'login', '-e', 'me@example.com', '-p', 'Sup3rS3cret!', '--auth-code', '998877']
     const line = redactArgs(args).join(' ')
@@ -57,9 +69,32 @@ describe('redactText', () => {
     expect(redactText('a=sekrit b=sekrit2', ['sekrit', 'sekrit2'])).not.toContain('sekrit')
   })
 
-  it('ignores empty or single-character secrets to avoid nuking the line', () => {
+  it('ignores empty or very short secrets to avoid nuking the line', () => {
     expect(redactText('abc', ['', null, undefined])).toBe('abc')
     expect(redactText('abc', ['a'])).toBe('abc')
+    // The floor is 4 characters: real passwords / 2FA codes / passphrases are
+    // always longer, while 2-3 letter "secrets" shred legitimate text.
+    expect(redactText('abc', ['abc'])).toBe('abc')
+    expect(redactText('abcd', ['abcd'])).toBe(REDACTION)
+  })
+
+  it('masks case-folded echoes of ASCII secrets (M8)', () => {
+    expect(redactText('Invalid password: HUNTER2', ['hunter2'])).toBe(`Invalid password: ${REDACTION}`)
+    expect(redactText('pw=HuNtEr2!', ['hunter2'])).toBe(`pw=${REDACTION}!`)
+  })
+
+  it('applies the longest secret first so nested secrets cannot shred it (M8)', () => {
+    // 'abcd' is a prefix of 'abcdefgh': replacing the short one first would
+    // leave the tail of the long one visible and break its match apart.
+    expect(redactText('value=abcdefgh', ['abcd', 'abcdefgh'])).toBe(`value=${REDACTION}`)
+    expect(redactText('value=abcdefgh', ['abcd', 'abcdefgh'])).not.toContain('efgh')
+  })
+
+  it('does not case-fold non-ASCII secrets', () => {
+    // Only pure-ASCII secrets get the case-insensitive pass; anything with
+    // non-ASCII characters stays exact-match (locale folding is a minefield).
+    expect(redactText('pässwort', ['Pässwort'])).toBe('pässwort')
+    expect(redactText('pässwort', ['pässwort'])).toBe(REDACTION)
   })
 
   it('is safe with regex metacharacters in the secret', () => {
@@ -76,5 +111,23 @@ describe('hasSecretFlag', () => {
 
   it('returns false for benign commands', () => {
     expect(hasSecretFlag(['search', 'telegram', '-l', '10'])).toBe(false)
+  })
+})
+
+describe('secretValuesFromArgs', () => {
+  it('harvests the values a raw-console user typed after secret flags', () => {
+    expect(secretValuesFromArgs(['auth', 'login', '-p', 'hunter2', '--auth-code', '123456'])).toEqual([
+      'hunter2',
+      '123456'
+    ])
+  })
+
+  it('harvests the inline --flag=value form', () => {
+    expect(secretValuesFromArgs(['--password=hunter2'])).toEqual(['hunter2'])
+    expect(secretValuesFromArgs(['--password='])).toEqual([])
+  })
+
+  it('returns nothing for flag-less argv', () => {
+    expect(secretValuesFromArgs(['search', 'telegram'])).toEqual([])
   })
 })
