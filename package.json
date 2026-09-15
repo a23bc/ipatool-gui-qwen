@@ -52,7 +52,7 @@
     "typescript-eslint": "8.46.4",
     "vite": "7.2.4",
     "vitest": "3.2.4",
-    "zustand": "5.0.8"
+    "zustand": "5.0.15"
   },
   "overrides": {
     "tar": "^7.4.3",
