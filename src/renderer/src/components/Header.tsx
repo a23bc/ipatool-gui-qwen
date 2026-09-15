@@ -1,8 +1,9 @@
-import { memo, useEffect, useRef } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Platform } from '@shared/types'
 import { useAppStore, engineReady } from '@renderer/store/app'
 import { useQueueStore } from '@renderer/store/queue'
+import { useProfilesStore } from '@renderer/store/profiles'
 import { useSearchStore } from '@renderer/store/search'
 import { useUiStore } from '@renderer/store/ui'
 import { Icon, Spinner } from './Icon'
@@ -70,19 +71,115 @@ function AccountButton(): ReactNode {
   const account = useAppStore((state) => state.account)
   const t = useAppStore((state) => state.t)
   const setAccountsOpen = useUiStore((state) => state.setAccountsOpen)
+  const setAuthOpen = useUiStore((state) => state.setAuthOpen)
+
+  const profiles = useProfilesStore((state) => state.profiles)
+  const loaded = useProfilesStore((state) => state.loaded)
+  const load = useProfilesStore((state) => state.load)
+  const setActive = useProfilesStore((state) => state.setActive)
+  const busy = useProfilesStore((state) => state.busy)
+
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!loaded) void load()
+  }, [loaded, load])
+
+  // Close on outside click / Escape.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (event: MouseEvent): void => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
 
   return (
-    <button
-      type="button"
-      className="no-drag btn btn-ghost h-[26px] gap-1.5 px-2"
-      onClick={() => setAccountsOpen(true)}
-      title={account ? account.name || account.email : t('auth.signIn')}
-    >
-      <Icon name="user" size={13} />
-      <span className="max-w-[150px] truncate text-[11.5px]">
-        {account ? account.email : t('auth.signIn')}
-      </span>
-    </button>
+    <div ref={rootRef} className="no-drag relative">
+      <button
+        type="button"
+        className="btn btn-ghost h-[26px] gap-1.5 px-2"
+        onClick={() => setOpen((value) => !value)}
+        title={account ? account.name || account.email : t('auth.signIn')}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <Icon name="user" size={13} />
+        <span className="max-w-[150px] truncate text-[11.5px]">
+          {account ? account.email : t('auth.signedOut')}
+        </span>
+        <Icon name="chevronDown" size={11} />
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          className="panel fade-in absolute right-0 top-[30px] z-50 flex w-[264px] flex-col py-1"
+          style={{ boxShadow: 'var(--shadow)' }}
+        >
+          {profiles.map((profile) => (
+            <button
+              key={profile.id}
+              type="button"
+              role="menuitem"
+              disabled={busy !== null}
+              className="flex items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-[var(--row-hover)]"
+              onClick={() => {
+                setOpen(false)
+                if (!profile.active) void setActive(profile.id)
+              }}
+            >
+              <span style={{ color: profile.active ? 'var(--accent)' : 'var(--text-faint)' }}>
+                <Icon name={profile.active ? 'checkCircle' : 'user'} size={13} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[12px] font-medium">{profile.name}</span>
+                <span className="mono block truncate text-[10.5px] faint">
+                  {profile.email || t('accounts.notSignedIn')}
+                </span>
+              </span>
+              {busy === profile.id ? <Spinner size={12} /> : null}
+            </button>
+          ))}
+
+          <div className="divider my-1" />
+
+          <button
+            type="button"
+            role="menuitem"
+            className="flex items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-[var(--row-hover)]"
+            onClick={() => {
+              setOpen(false)
+              setAuthOpen(true)
+            }}
+          >
+            <Icon name="key" size={13} />
+            {account ? t('accounts.relogin') : t('auth.signIn')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-[var(--row-hover)]"
+            onClick={() => {
+              setOpen(false)
+              setAccountsOpen(true)
+            }}
+          >
+            <Icon name="settings" size={13} />
+            {t('accounts.title')}
+          </button>
+        </div>
+      ) : null}
+    </div>
   )
 }
 

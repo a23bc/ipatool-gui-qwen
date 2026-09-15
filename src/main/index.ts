@@ -13,6 +13,7 @@ import { applySettings, registerEventForwarding, registerIpc } from './ipc'
 import { createMainWindow } from './window'
 import { settingsStore } from './settings'
 import { engineManager } from './engine'
+import { migrateLegacyState } from './profiles'
 import { downloadQueue } from './queue'
 import { ipatoolApi } from './api'
 import { taskRegistry } from './tasks'
@@ -42,6 +43,10 @@ async function bootstrap(): Promise<void> {
   const settings = await settingsStore.load()
   nativeTheme.themeSource = settings.theme
   taskRegistry.setLineCap(settings.maxLogLines)
+
+  // Must happen before any ipatool invocation: see profiles.migrateLegacyState.
+  const migrated = await migrateLegacyState().catch(() => null)
+  if (migrated) console.info('[main] migrated legacy ipatool state to', migrated)
 
   registerEventForwarding()
   registerIpc()

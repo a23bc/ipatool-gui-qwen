@@ -15,7 +15,8 @@
  *    never resumes under a different account after a switch.
  */
 
-import { mkdir, rm } from 'node:fs/promises'
+import { mkdir, rename as renameDir, rm, stat } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { app } from 'electron'
 import type { Profile } from '../shared/types'
@@ -172,6 +173,45 @@ function ensureDefaultAfterWipe(): Profile {
     stateDir: '',
     createdAt: Date.now(),
     lastUsedAt: Date.now()
+  }
+}
+
+/**
+ * One-time migration of ipatool's legacy state directory (~/.ipatool).
+ *
+ * Upstream resolve order is dangerous for multi-account use: when the legacy
+ * directory exists, ipatool falls back to it if the XDG target already exists
+ * (every profile would silently share one session), or *moves* it into whatever
+ * profile happens to run first. Neither is acceptable, so we perform the move
+ * ourselves, exactly once, into the default profile, before ipatool ever runs.
+ * After this the legacy path never exists and per-profile isolation is
+ * deterministic.
+ *
+ * Returns the new location, or null when there was nothing to migrate.
+ */
+export async function migrateLegacyState(): Promise<string | null> {
+  const legacy = path.join(os.homedir(), '.ipatool')
+  const target = path.join(dirFor(ensureDefault()), 'ipatool')
+
+  const exists = async (candidate: string): Promise<boolean> => {
+    try {
+      await stat(candidate)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  if (!(await exists(legacy))) return null
+  // Never clobber an existing session.
+  if (await exists(target)) return null
+
+  await mkdir(path.dirname(target), { recursive: true }).catch(() => {})
+  try {
+    await renameDir(legacy, target)
+    return target
+  } catch {
+    return null
   }
 }
 

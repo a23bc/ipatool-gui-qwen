@@ -91,7 +91,11 @@ ipatool 把唯一会话（keyring 文件 + cookie jar）放在状态目录里，
 - 切换账户不需要退出另一个账户；
 - 下载队列项记录创建时的 profile id，切换账户后**不会**用错误会话续传或误购；
 - profile 的 `stateDir` 留空 = 应用管理的隔离目录；填路径 = 与终端 CLI 共用该会话（迁移友好）；
-- 删除 profile 时只删除应用自建的目录，自定义目录一律保留。
+- 删除 profile 时只删除应用自建的目录，自定义目录一律保留；
+- 启动时一次性把上游遗留的 `~/.ipatool` 迁移进默认 profile。这一步必须由我们自己做：
+  上游迁移逻辑在「遗留目录存在且 XDG 目标已存在」时会**回退到遗留目录**（导致所有账户共用
+  一个会话），在「目标不存在」时又会把遗留目录搬给第一个运行的 profile；
+- 顶栏账户按钮是**一键切换**的下拉菜单；增删改与重命名在账户管理器里。
 
 ### 性能与流畅性
 
@@ -128,8 +132,12 @@ ipatool 把唯一会话（keyring 文件 + cookie jar）放在状态目录里，
 > | 动作 | 结果 |
 > | --- | --- |
 > | 推送分支 | 仅 `ci.yml` 验证，无产物 |
-> | 推送 `v*` 标签 | 三平台构建，安装包作为**该次运行的 Artifacts**；不创建 Release |
+> | 推送 `v*` 标签 | 4 个矩阵（win-x64 / mac-x64 / mac-arm64 / linux-x64）各自构建，**每个平台+架构一个独立 artifact**；不创建 Release |
 > | Actions → Release → Run workflow | 同上；勾选 `publish` 才会额外创建 **Draft** Release |
+>
+> artifact 按「平台+架构」拆分上传：只想要 Linux x64 时不必把 arm64 或别的平台一起下载。
+> macOS 在 CI 上产 **zip**（GitHub 的 macOS runner 无法运行 dmg 所需的 `hdiutil attach`，
+> 会报 `Device not configured`）；在真实 Mac 上 `npm run dist:mac` 仍会产 dmg。
 >
 > Draft 不是公开状态，仍需到 Releases 页手动点 Publish 才对外可见。
 > 地下开发阶段只要不勾 `publish`，仓库对外不会留下任何 Release 痕迹。

@@ -79,6 +79,7 @@ export function AuthModal(): ReactNode {
       if (remember) await updateSettings({ lastEmail: email.trim() })
       else if (settings.lastEmail) await updateSettings({ lastEmail: '' })
       useAppStore.getState().setAccount(result.account)
+      void useProfilesStore.getState().load()
       setOpen(false)
       toast({ kind: 'success', message: t('auth.success', { email: result.account?.email ?? email }) })
       setPassword('')

@@ -4,11 +4,13 @@ name: Release
 #
 # Nothing is ever published by accident:
 #   - pushing a branch  -> ci.yml only (verify, no artifacts)
-#   - pushing a v* tag  -> this workflow builds all platforms and uploads the
-#                          installers as *run artifacts*; no GitHub Release
+#   - pushing a v* tag  -> this workflow builds every platform/arch combination
+#                          and uploads each as its OWN run artifact
 #   - manual dispatch   -> same as a tag push, plus an opt-in checkbox to also
-#                          create a DRAFT release (drafts are not public; they
-#                          still need an explicit Publish click to go live)
+#                          create a DRAFT release (drafts are not public)
+#
+# Artifacts are uploaded per (platform, arch) on purpose: fetching the Linux
+# x64 package must not drag the arm64 one (or any other platform) along with it.
 on:
   push:
     tags: ['v*']
@@ -24,17 +26,38 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.platform }}
+    name: ${{ matrix.label }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
             platform: win
+            arch: x64
+            flag: '--x64'
+            extra: ''
+            label: 'Windows x64'
+          # CI builds zip, not dmg: GitHub macOS runners cannot run
+          # `hdiutil attach` ("Device not configured"), which dmg-builder needs.
+          # A local `npm run dist:mac` on a real Mac still produces the dmg.
           - os: macos-14
             platform: mac
+            arch: x64
+            flag: '--x64'
+            extra: '-c.mac.target=zip'
+            label: 'macOS x64 (zip)'
+          - os: macos-14
+            platform: mac
+            arch: arm64
+            flag: '--arm64'
+            extra: '-c.mac.target=zip'
+            label: 'macOS arm64 (zip)'
           - os: ubuntu-22.04
             platform: linux
+            arch: x64
+            flag: '--x64'
+            extra: ''
+            label: 'Linux x64'
     runs-on: ${{ matrix.os }}
     # Windows runners default to PowerShell, which breaks the Unix tooling used
     # below (ls, line continuations). bash ships on all three runner images.
@@ -62,14 +85,10 @@ jobs:
             fakeroot dpkg rpm libarchive-tools
 
       # Packaging consumes dist/, so it must exist before electron-builder runs.
-      # (This step was once missing and produced a confusing
-      # "entry file was not found in this archive" failure.)
       - name: Build app bundle
         run: npm run build
         env:
           APP_REPO: ${{ github.repository }}
-          # Only tags carry a meaningful version; otherwise fall back to the
-          # version in package.json (build-main.mjs treats "" as unset).
           APP_VERSION: "${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}"
 
       # Fail fast with an obvious message instead of an asar sanity-check error.
@@ -91,7 +110,7 @@ jobs:
           '
 
       - name: Build installers
-        run: npx electron-builder --${{ matrix.platform }} --publish never
+        run: npx electron-builder --${{ matrix.platform }} ${{ matrix.flag }} ${{ matrix.extra }} --publish never
         env:
           # Builds are unsigned by design; make that explicit so a missing
           # certificate never silently changes the output.
@@ -100,7 +119,6 @@ jobs:
       - name: List artifacts
         run: ls -lh release/
 
-      # Makes it obvious from the run page what was produced and where it goes.
       # Pure node so it behaves identically on every OS and shell.
       - name: Add artifact list to job summary
         run: |
@@ -115,11 +133,12 @@ jobs:
               .sort((a, b) => b.size - a.size);
             const mb = (n) => (n / 1024 / 1024).toFixed(1) + " MB";
             const lines = [
-              "## Artifacts - ${{ matrix.platform }}", "",
+              "## Artifacts - ${{ matrix.label }}", "",
               ...rows.map((r) => "- `" + r.name + "` (" + mb(r.size) + ")"),
               "",
-              "Download these from **Artifacts** on this run. Nothing is published",
-              "unless the *publish* job runs (opt-in checkbox on manual dispatch).", ""
+              "Download **release-${{ matrix.platform }}-${{ matrix.arch }}** from",
+              "Artifacts on this run - each platform/arch is uploaded separately.",
+              ""
             ];
             const text = lines.join("\n");
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text);
@@ -128,7 +147,9 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.platform }}
+          # One artifact per platform+arch so a single package can be fetched
+          # without downloading unrelated builds.
+          name: release-${{ matrix.platform }}-${{ matrix.arch }}
           path: |
             release/*.exe
             release/*.dmg
@@ -159,7 +180,7 @@ jobs:
           gh release create "$TAG" \
             --title "IPATool GUI ${TAG}" \
             --draft \
-            --notes "Installers for Windows (NSIS + portable), macOS (dmg, unsigned) and Linux (AppImage, deb).
+            --notes "Installers for Windows (NSIS + portable), macOS (zip; build a dmg locally with npm run dist:mac) and Linux (AppImage, deb).
 
           Builds are **unsigned**: on macOS right-click → Open the first time; on Windows accept the SmartScreen prompt.
 
