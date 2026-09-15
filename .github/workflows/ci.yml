@@ -73,7 +73,11 @@ jobs:
               "## Bundle sizes", "",
               "| file | raw | gzip |", "| --- | ---: | ---: |",
               ...rows.map(([file, r, g]) => "| `" + file + "` | " + kb(r) + " | " + kb(g) + " |"),
-              "| **total** | **" + kb(raw) + "** | **" + kb(gz) + "** |", ""
+              "| **total** | **" + kb(raw) + "** | **" + kb(gz) + "** |", "",
+              "> **Note:** this workflow only verifies. Installers are built by the",
+              "> **Release** workflow, which triggers on a pushed `v*` tag (or a manual",
+              "> dispatch from the Actions tab). Pushing a branch never produces artifacts.",
+              ""
             ];
             const table = lines.join("\n");
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);

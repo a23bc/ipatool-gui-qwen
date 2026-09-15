@@ -60,6 +60,19 @@ jobs:
       - name: List artifacts
         run: ls -lh release/
 
+      # Makes it obvious from the run page what was produced and where it goes,
+      # so "no artifacts" is never a mystery again.
+      - name: Add artifact list to job summary
+        run: |
+          {
+            echo "## Artifacts — ${{ matrix.platform }}"
+            echo
+            ls -lh release/ | awk 'NR>1 && $9 != "" {print "- `" $9 "` (" $5 ")"}'
+            echo
+            echo "Uploaded as **run artifacts** below. A GitHub Release attaching them is"
+            echo "created by the *publish* job, which runs only for pushed \`v*\` tags."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.platform }}
