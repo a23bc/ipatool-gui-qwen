@@ -6,6 +6,7 @@ function view(id: string, active: boolean): ProfileView {
   return {
     id,
     name: id,
+    remark: '',
     email: '',
     stateDir: '',
     createdAt: 0,

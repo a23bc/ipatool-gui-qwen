@@ -49,7 +49,7 @@ export function AccountManager(): ReactNode {
 
   const startRename = (profile: ProfileView): void => {
     setRenamingId(profile.id)
-    setRenameValue(profile.name)
+    setRenameValue(profile.remark)
   }
 
   const commitRename = async (): Promise<void> => {
@@ -93,7 +93,7 @@ export function AccountManager(): ReactNode {
             <input
               className="input h-[30px] w-[180px]"
               value={newName}
-              placeholder={t('accounts.addPlaceholder')}
+              placeholder={t('accounts.remarkPlaceholder')}
               spellCheck={false}
               onChange={(event) => setNewName(event.target.value)}
               onKeyDown={(event) => {
@@ -167,6 +167,11 @@ export function AccountManager(): ReactNode {
                 ) : (
                   <span className="truncate text-[13px] font-medium">{profile.name}</span>
                 )}
+                {profile.remark ? (
+                  <span className="badge shrink-0" title={profile.remark}>
+                    {profile.remark}
+                  </span>
+                ) : null}
                 {profile.active ? (
                   <span className="badge badge-accent shrink-0">{t('accounts.active')}</span>
                 ) : null}
@@ -186,6 +191,7 @@ export function AccountManager(): ReactNode {
               <p className="mono mt-0.5 truncate text-[11.5px] dim">
                 {profile.email || t('accounts.notSignedIn')}
               </p>
+              <p className="mt-0.5 truncate text-[10.5px] faint">{t('accounts.nameIsAuto')}</p>
 
               {editingDirId === profile.id ? (
                 <div className="mt-1.5 flex items-center gap-1.5">
@@ -244,7 +250,7 @@ export function AccountManager(): ReactNode {
                 type="button"
                 className="btn btn-ghost btn-icon h-[26px] w-[26px]"
                 onClick={() => startRename(profile)}
-                title={t('accounts.rename')}
+                title={t('accounts.editRemark')}
               >
                 <Icon name="settings" size={13} />
               </button>

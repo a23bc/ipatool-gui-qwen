@@ -98,6 +98,7 @@ export function ensureDefault(): Profile {
   const profile: Profile = {
     id: 'p-default',
     name: 'Default',
+    remark: '',
     email: '',
     // Empty stateDir => ipatool's own default location, so an existing CLI
     // session (and its login) carries over instead of being orphaned.
@@ -121,31 +122,54 @@ function commit(profiles: Profile[], activeProfileId: string): void {
   settingsStore.emitChange()
 }
 
-export function add(name: string): Profile {
+/**
+ * Creates a profile.
+ *
+ * The typed text becomes the optional *remark*; the identity label is a unique
+ * placeholder until login replaces it with the account name/e-mail. The counter
+ * is persisted, so removing profiles can never recycle a name and produce two
+ * identically-labelled entries (which once made switching look like overwriting).
+ */
+export function add(remark: string): Profile {
+  const settings = settingsStore.getInternal()
+  const counter = Math.max(1, Math.round(settings.profileCounter || 1))
   const profile: Profile = {
     id: newId(),
-    name: name.trim() || `Account ${list().length + 1}`,
+    name: `Account ${counter}`,
+    remark: remark.trim(),
     email: '',
     stateDir: '',
     createdAt: Date.now(),
     lastUsedAt: Date.now()
   }
+  settingsStore.override({ ...settings, profileCounter: counter + 1 })
   commit([...list(), profile], profile.id)
   return profile
 }
 
-export function rename(id: string, name: string): Profile | null {
+/** Edits the user's free-form note; the identity label stays auto-managed. */
+export function setRemark(id: string, remark: string): Profile | null {
   const profiles = list().map((profile) =>
-    profile.id === id ? { ...profile, name: name.trim() || profile.name } : profile
+    profile.id === id ? { ...profile, remark: remark.trim() } : profile
   )
   commit(profiles, settingsStore.getInternal().activeProfileId)
   return get(id)
 }
 
-/** Stores the resolved Apple ID so the switcher can label profiles. */
+/** Kept for API compatibility; now edits the remark, not the identity label. */
+export function rename(id: string, remark: string): Profile | null {
+  return setRemark(id, remark)
+}
+
+/**
+ * Stores the resolved Apple ID and adopts it as the identity label, so a
+ * profile is recognisable at a glance without any manual naming.
+ */
 export function setInfo(id: string, email: string, name: string): void {
   const profiles = list().map((profile) =>
-    profile.id === id ? { ...profile, email, name: profile.name === 'Default' && name ? name : profile.name } : profile
+    profile.id === id
+      ? { ...profile, email, name: name.trim() || email.trim() || profile.name }
+      : profile
   )
   commit(profiles, settingsStore.getInternal().activeProfileId)
 }
@@ -199,6 +223,7 @@ function ensureDefaultAfterWipe(): Profile {
   return {
     id: newId(),
     name: 'Default',
+    remark: '',
     email: '',
     stateDir: '',
     createdAt: Date.now(),

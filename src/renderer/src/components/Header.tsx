@@ -144,7 +144,9 @@ function AccountButton(): ReactNode {
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[12px] font-medium">{profile.name}</span>
                 <span className="mono block truncate text-[10.5px] faint">
-                  {profile.email || t('accounts.notSignedIn')}
+                  {profile.remark
+                    ? `${profile.email || t('accounts.notSignedIn')} · ${profile.remark}`
+                    : profile.email || t('accounts.notSignedIn')}
                 </span>
               </span>
               {busy === profile.id ? <Spinner size={12} /> : null}

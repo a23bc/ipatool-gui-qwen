@@ -46,6 +46,7 @@ export function defaultSettings(): Settings {
     keychainPassphrase: '',
     profiles: [],
     activeProfileId: '',
+    profileCounter: 1,
     verbose: false,
     theme: 'system',
     locale: 'system',
@@ -106,6 +107,8 @@ export function normalizeSettings(input: unknown): Settings {
   }
   const activeId = (raw as { activeProfileId?: unknown }).activeProfileId
   if (typeof activeId === 'string') out.activeProfileId = activeId
+  const counter = (raw as { profileCounter?: unknown }).profileCounter
+  if (typeof counter === 'number' && Number.isFinite(counter)) out.profileCounter = counter
 
   // Migration: pre-profile builds stored a single global XDG_STATE_HOME. Carry
   // it into the default profile so an existing session is not orphaned.
@@ -114,7 +117,8 @@ export function normalizeSettings(input: unknown): Settings {
     out.profiles = [
       {
         id: 'p-default',
-        name: 'Default',
+        name: out.lastEmail || 'Default',
+        remark: '',
         email: out.lastEmail,
         stateDir: typeof legacyDir === 'string' ? legacyDir : '',
         createdAt: Date.now(),
@@ -122,6 +126,9 @@ export function normalizeSettings(input: unknown): Settings {
       }
     ]
   }
+  // Keep the placeholder counter ahead of any migrated profiles so generated
+  // names can never collide with an existing one.
+  if (out.profileCounter <= out.profiles.length) out.profileCounter = out.profiles.length + 1
   if (!out.profiles.some((profile) => profile.id === out.activeProfileId)) {
     out.activeProfileId = out.profiles[0].id
   }
@@ -141,6 +148,7 @@ function coerceProfile(entry: unknown): Profile | null {
   return {
     id: obj.id,
     name: typeof obj.name === 'string' && obj.name !== '' ? obj.name : 'Account',
+    remark: typeof obj.remark === 'string' ? obj.remark : '',
     email: typeof obj.email === 'string' ? obj.email : '',
     stateDir: typeof obj.stateDir === 'string' ? obj.stateDir : '',
     createdAt: typeof obj.createdAt === 'number' ? obj.createdAt : Date.now(),

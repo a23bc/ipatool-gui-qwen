@@ -79,6 +79,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     keychainPassphrase: '',
     profiles: [],
     activeProfileId: '',
+    profileCounter: 1,
     verbose: false,
     theme: 'system',
     locale: 'system',

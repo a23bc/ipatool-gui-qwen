@@ -224,7 +224,13 @@ export type PassphraseMode = 'auto' | 'manual' | 'none'
  */
 export interface Profile {
   id: string
+  /**
+   * Auto-managed identity label: the account name or e-mail once known, a
+   * unique placeholder ("Account 3") before that. Never user-edited.
+   */
   name: string
+  /** Free-form user note, shown alongside the identity. Optional. */
+  remark: string
   /** Resolved Apple ID e-mail, once known. */
   email: string
   /** '' = ipatool's default location (shared with the terminal CLI). */
@@ -254,6 +260,8 @@ export interface Settings {
   /** App Store accounts; each maps to an isolated ipatool state directory. */
   profiles: Profile[]
   activeProfileId: string
+  /** Monotonic source for unique placeholder names ("Account N"). */
+  profileCounter: number
   verbose: boolean
   theme: ThemeMode
   locale: LocaleMode
