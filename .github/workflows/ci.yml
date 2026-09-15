@@ -44,10 +44,38 @@ jobs:
         env:
           APP_REPO: ${{ github.repository }}
 
+      # Raw sizes are misleading (they are what V8 parses, not what ships), so
+      # report both raw and gzip. One contiguous bundle per process is expected:
+      # see the note in vite.config.ts about why we do not split chunks.
       - name: Report bundle sizes
         run: |
-          echo "## Bundle sizes" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          du -h dist/main/index.js dist/preload/index.js >> "$GITHUB_STEP_SUMMARY"
-          ls -lh dist/renderer/assets | awk '{print $5, $9}' >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          node -e '
+            const {gzipSync} = require("zlib");
+            const fs = require("fs");
+            const path = require("path");
+            const rows = [];
+            let raw = 0, gz = 0;
+            const walk = (dir) => {
+              for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) { walk(full); continue; }
+                if (!/\.(js|css)$/.test(entry.name)) continue;
+                const buf = fs.readFileSync(full);
+                const compressed = gzipSync(buf, {level: 9});
+                raw += buf.length; gz += compressed.length;
+                rows.push([full, buf.length, compressed.length]);
+              }
+            };
+            walk("dist");
+            rows.sort((a, b) => b[1] - a[1]);
+            const kb = (n) => (n / 1024).toFixed(1) + "K";
+            const lines = [
+              "## Bundle sizes", "",
+              "| file | raw | gzip |", "| --- | ---: | ---: |",
+              ...rows.map(([file, r, g]) => "| `" + file + "` | " + kb(r) + " | " + kb(g) + " |"),
+              "| **total** | **" + kb(raw) + "** | **" + kb(gz) + "** |", ""
+            ];
+            const table = lines.join("\n");
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
+            console.log(table);
+          '

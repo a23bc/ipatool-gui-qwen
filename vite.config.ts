@@ -25,18 +25,14 @@ export default defineConfig({
     assetsInlineLimit: 4096,
     reportCompressedSize: false,
     chunkSizeWarningLimit: 900,
-    rollupOptions: {
-      output: {
-        // Split the heavy, rarely-changing vendor code so the app shell stays tiny
-        // and repeat launches hit the disk cache.
-        manualChunks(id) {
-          if (!id.includes('node_modules')) return undefined
-          if (id.includes('@tanstack')) return 'vendor-virtual'
-          if (id.includes('react') || id.includes('scheduler')) return 'vendor-react'
-          return 'vendor'
-        }
-      }
-    }
+    // No manual chunk splitting, deliberately.
+    //
+    // Splitting only pays off for (a) HTTP cache reuse across deploys and
+    // (b) lazy loading via dynamic import. Neither applies to an Electron
+    // renderer: the whole bundle ships inside the installer, every module is
+    // loaded at start-up, and there are no dynamic imports. Splitting would just
+    // add chunk-boundary wrappers and extra file reads (it previously produced a
+    // 344-byte orphan chunk holding zustand alone), for ~zero gzip difference.
   },
   server: {
     port: 5173,
