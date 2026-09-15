@@ -32,6 +32,8 @@ export function AccountManager(): ReactNode {
   const setActive = useProfilesStore((state) => state.setActive)
   const refreshInfo = useProfilesStore((state) => state.refreshInfo)
   const setStateDir = useProfilesStore((state) => state.setStateDir)
+  const forgetPassword = useProfilesStore((state) => state.forgetPassword)
+  const platform = useAppStore((state) => state.appInfo?.platform)
 
   const [newName, setNewName] = useState('')
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -118,6 +120,16 @@ export function AccountManager(): ReactNode {
       }
     >
       <div className="flex flex-col gap-2">
+        {platform === 'darwin' ? (
+          <p
+            className="flex items-start gap-2 rounded-md px-2.5 py-2 text-[11.5px] leading-relaxed"
+            style={{ background: 'var(--warn-soft)', color: 'var(--warn)' }}
+          >
+            <Icon name="info" size={13} className="mt-0.5 shrink-0" />
+            <span>{t('accounts.darwinNote')}</span>
+          </p>
+        ) : null}
+
         {!loaded ? (
           <div className="flex flex-col gap-2">
             {Array.from({ length: 2 }, (_, index) => (
@@ -157,6 +169,17 @@ export function AccountManager(): ReactNode {
                 )}
                 {profile.active ? (
                   <span className="badge badge-accent shrink-0">{t('accounts.active')}</span>
+                ) : null}
+                {profile.hasPassword ? (
+                  <button
+                    type="button"
+                    className="badge badge-success shrink-0 cursor-pointer"
+                    title={t('accounts.forgetPassword')}
+                    onClick={() => void forgetPassword(profile.id)}
+                  >
+                    <Icon name="key" size={10} />
+                    {t('accounts.hasPassword')}
+                  </button>
                 ) : null}
               </div>
 

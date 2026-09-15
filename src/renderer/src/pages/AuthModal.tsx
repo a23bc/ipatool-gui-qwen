@@ -47,6 +47,7 @@ export function AuthModal(): ReactNode {
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [remember, setRemember] = useState(Boolean(settings.lastEmail))
+  const [rememberPassword, setRememberPassword] = useState(false)
   const [step, setStep] = useState<Step>('credentials')
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<{ message: string; code: string | null } | null>(null)
@@ -82,6 +83,13 @@ export function AuthModal(): ReactNode {
     if (result.status === 'ok') {
       if (remember) await updateSettings({ lastEmail: email.trim() })
       else if (settings.lastEmail) await updateSettings({ lastEmail: '' })
+      // Opt-in only: storing the password is what makes one-click switching
+      // possible on platforms whose keyring is a single machine-wide slot.
+      const target = profile?.id
+      if (target) {
+        if (rememberPassword) await useProfilesStore.getState().storePassword(target, password)
+        else await useProfilesStore.getState().forgetPassword(target)
+      }
       useAppStore.getState().setAccount(result.account)
       void useProfilesStore.getState().load()
       setOpen(false)
@@ -231,6 +239,17 @@ export function AuthModal(): ReactNode {
                   onChange={(event) => setRemember(event.target.checked)}
                 />
                 {t('auth.remember')}
+              </label>
+
+              <label className="flex cursor-pointer items-start gap-2 text-[11.5px] dim">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  style={{ accentColor: 'var(--accent)' }}
+                  checked={rememberPassword}
+                  onChange={(event) => setRememberPassword(event.target.checked)}
+                />
+                <span>{t('auth.rememberPassword')}</span>
               </label>
 
               <p className="text-[11.5px] leading-relaxed faint">{t('auth.slow')}</p>

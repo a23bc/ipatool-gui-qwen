@@ -156,6 +156,18 @@ export function startProcess(binary: string, options: RunOptions): RunningProces
     ...(options.env ?? {})
   }
 
+  // ipatool stores credentials in the first available keyring backend:
+  // macOS Keychain, then Linux SecretService, then a per-directory file.
+  // The first two are machine-wide single slots, which makes multi-account
+  // impossible. On Linux we can opt into real isolation by hiding D-Bus from the
+  // child, which makes SecretService unavailable and selects the file backend
+  // (already scoped to the profile's state directory). macOS has no such switch;
+  // there, switching re-authenticates via stored passwords instead.
+  if (process.platform === 'linux') {
+    delete env.DBUS_SESSION_BUS_ADDRESS
+    delete env.DBUS_SYSTEM_BUS_ADDRESS
+  }
+
   const stdoutBuffer = new LineBuffer()
   const stderrBuffer = new LineBuffer()
 

@@ -25,6 +25,8 @@ export interface ProfilesState {
   remove: (id: string) => Promise<void>
   setActive: (id: string) => Promise<void>
   refreshInfo: (id: string) => Promise<void>
+  storePassword: (id: string, password: string) => Promise<void>
+  forgetPassword: (id: string) => Promise<void>
 }
 
 export const useProfilesStore = create<ProfilesState>()((set) => ({
@@ -88,6 +90,14 @@ export const useProfilesStore = create<ProfilesState>()((set) => ({
       const result = await window.api.setActiveProfile(id)
       set({ profiles: result.profiles })
       useAppStore.getState().setAccount(result.account)
+      if (result.needs2fa) {
+        const { t } = useAppStore.getState()
+        useUiStore.getState().toast({
+          kind: 'warn',
+          message: t('accounts.needs2fa')
+        })
+        useUiStore.getState().setAuthOpen(true)
+      }
       // Search results and purchases belong to the previous storefront session.
       const search = await import('./search').then((m) => m.useSearchStore.getState())
       search.clearResults()
@@ -96,6 +106,16 @@ export const useProfilesStore = create<ProfilesState>()((set) => ({
     } finally {
       set({ busy: null })
     }
+  },
+
+  async storePassword(id, password) {
+    const profiles = await window.api.setProfilePassword(id, password)
+    set({ profiles })
+  },
+
+  async forgetPassword(id) {
+    const profiles = await window.api.forgetProfilePassword(id)
+    set({ profiles })
   },
 
   async refreshInfo(id) {

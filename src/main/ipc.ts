@@ -31,6 +31,7 @@ import { downloadQueue } from './queue'
 import { engineManager, EngineError } from './engine'
 import * as profiles from './profiles'
 import { migrateLegacyState } from './profiles'
+import * as credentials from './credentials'
 import { settingsStore } from './settings'
 import { taskRegistry } from './tasks'
 import { APP_PRODUCT, APP_VERSION, checkAppUpdate } from './update'
@@ -146,12 +147,23 @@ export function registerIpc(): void {
     // A brand-new profile has no session; clear the cached account so the login
     // dialog never shows the previous profile's identity.
     await migrateLegacyState().catch(() => null)
-    profiles.add(String(name ?? ''))
+    const added = profiles.add(String(name ?? ''))
     setAccount(null)
+    // Remember which account we came from so silent switching can restore it.
+    return { profiles: await profileViews(), addedId: added.id }
+  })
+
+  ipcMain.handle(IPC.ProfilesSetPassword, async (_e, id: string, password: string) => {
+    await credentials.set(String(id), String(password ?? ''))
     return profileViews()
   })
 
-  ipcMain.handle(IPC.ProfilesRename, (_e, id: string, name: string) => {
+  ipcMain.handle(IPC.ProfilesForgetPassword, async (_e, id: string) => {
+    await credentials.clear(String(id))
+    return profileViews()
+  })
+
+  ipcMain.handle(IPC.ProfilesRename, async (_e, id: string, name: string) => {
     profiles.rename(String(id), String(name ?? ''))
     return profileViews()
   })
@@ -169,24 +181,43 @@ export function registerIpc(): void {
 
   ipcMain.handle(IPC.ProfilesRemove, async (_e, id: string) => {
     const result = await profiles.remove(String(id))
+    await credentials.clear(String(id)).catch(() => {})
     cachedAccount = null
-    void refreshActiveAccount()
-    return { profiles: profileViews(), removedDir: result.removedDir }
+    await refreshActiveAccount()
+    return { profiles: await profileViews(), removedDir: result.removedDir }
   })
 
   ipcMain.handle(IPC.ProfilesSetActive, async (_e, id: string) => {
     await migrateLegacyState().catch(() => null)
+    const target = profiles.get(String(id))
     profiles.setActive(String(id))
     // Immediately drop the previous identity so no UI can show it for the new
-    // profile, then read the new profile's real session.
+    // profile.
     setAccount(null)
+    if (!target) return { profiles: await profileViews(), account: null, needs2fa: false }
+
+    // On macOS / keyring-backed Linux the OS keychain holds a single machine-wide
+    // session, so "switching" must re-authenticate the target account. With a
+    // stored password this is silent; otherwise the user signs in manually.
+    const password = await credentials.get(target.id)
+    if (password && target.email) {
+      const result = await ipatoolApi.login(target.email, password, undefined, target.id)
+      if (result.status === 'ok' && result.account) {
+        setAccount(result.account)
+        return { profiles: await profileViews(), account: result.account, needs2fa: false }
+      }
+      if (result.status === 'needs-2fa') {
+        return { profiles: await profileViews(), account: null, needs2fa: true }
+      }
+    }
+
     const account = await refreshActiveAccount()
-    return { profiles: profileViews(), account }
+    return { profiles: await profileViews(), account, needs2fa: false }
   })
 
   ipcMain.handle(IPC.ProfilesRefreshInfo, async (_e, id: string) => {
     const account = await ipatoolApi.accountInfoOrNull(String(id)).catch(() => null)
-    return { profiles: profileViews(), account }
+    return { profiles: await profileViews(), account }
   })
 
   /* ---------------------------------------------------------------- *
@@ -443,14 +474,19 @@ export function applySettings(settings: Settings): void {
   broadcast('settings:changed', settings)
 }
 
-/** Profiles annotated with active flag and resolved directory. */
-function profileViews(): ProfileView[] {
+/** Profiles annotated with active flag, resolved directory and password state. */
+async function profileViews(): Promise<ProfileView[]> {
   const activeId = profiles.active().id
-  return profiles.list().map((profile) => ({
-    ...profile,
-    active: profile.id === activeId,
-    dir: profiles.dirFor(profile)
-  }))
+  const views: ProfileView[] = []
+  for (const profile of profiles.list()) {
+    views.push({
+      ...profile,
+      active: profile.id === activeId,
+      dir: profiles.dirFor(profile),
+      hasPassword: await credentials.has(profile.id)
+    })
+  }
+  return views
 }
 
 /** Re-reads the active profile's session and broadcasts it. */

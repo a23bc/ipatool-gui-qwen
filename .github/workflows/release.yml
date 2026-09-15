@@ -2,12 +2,18 @@ name: Release
 
 # Stealth-friendly trigger model.
 #
-# Nothing is ever published by accident:
+# Nothing is ever PUBLIC by accident:
 #   - pushing a branch  -> ci.yml only (verify, no artifacts)
-#   - pushing a v* tag  -> this workflow builds every platform/arch combination
-#                          and uploads each as its OWN run artifact
-#   - manual dispatch   -> same as a tag push, plus an opt-in checkbox to also
-#                          create a DRAFT release (drafts are not public)
+#   - pushing a v* tag  -> builds every platform/arch combination, uploads each
+#                          as its OWN run artifact, and creates a DRAFT release
+#                          whose assets are the raw files (no zip wrapper)
+#   - manual dispatch   -> same, with an opt-in checkbox for the draft release
+#
+# Why the draft release exists at all: GitHub Actions *artifacts* are always
+# delivered as a zip container - that is platform behaviour we cannot change.
+# Release assets, by contrast, are served as-is. A draft is invisible to anyone
+# without repo write access and never appears in the public release feed; it
+# only becomes public when someone clicks Publish.
 #
 # Artifacts are uploaded per (platform, arch) on purpose: fetching the Linux
 # x64 package must not drag the arm64 one (or any other platform) along with it.
@@ -175,11 +181,14 @@ jobs:
           retention-days: 30
 
   publish:
-    name: Create draft release (opt-in)
+    name: Create DRAFT release (raw assets, hidden until published)
     needs: build
     runs-on: ubuntu-latest
-    # Explicit opt-in only. A tag push produces artifacts but no release.
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true'
+    # Tag pushes get a draft automatically (raw, unzipped downloads for the team);
+    # dispatches only when the checkbox is ticked. Drafts are not public.
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true')
     steps:
       - uses: actions/download-artifact@v4
         with:

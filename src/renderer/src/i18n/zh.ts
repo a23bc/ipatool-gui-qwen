@@ -224,6 +224,12 @@ export const zh: Dict = {
   'accounts.removedDir': '账户已移除，其会话数据已删除',
   'accounts.keptDir': '账户已移除，自定义目录保留在磁盘上',
 
+  'auth.rememberPassword': '记住密码（在本机加密保存），以便一键切换回该账户',
+  'accounts.hasPassword': '已存密码',
+  'accounts.forgetPassword': '忘记已存密码',
+  'accounts.needs2fa': 'Apple 要求双重验证码；请完成该账户的登录',
+  'accounts.darwinNote': 'macOS 上 ipatool 把凭据放在系统钥匙串中，全机只有一份会话。因此切换账户时若已存密码会自动重新登录目标账户；未存密码则需在切换后重新登录。',
+
   /* ---------------- downloads ---------------- */
   'downloads.title': '下载',
   'downloads.empty.title': '暂无下载任务',

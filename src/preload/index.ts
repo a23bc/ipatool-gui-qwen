@@ -15,7 +15,8 @@ import {
   type EventPayloadMap,
   type FileFilter,
   type ProfileView,
-  type RendererApi
+  type RendererApi,
+  type SwitchResult
 } from '../shared/ipc'
 import type {
   AccountInfo,
@@ -75,8 +76,11 @@ const api: RendererApi = {
     ipcRenderer.invoke(IPC.ProfilesRemove, id),
   renameProfile: (id: string, name: string): Promise<ProfileView[]> =>
     ipcRenderer.invoke(IPC.ProfilesRename, id, name),
-  setActiveProfile: (id: string): Promise<{ profiles: ProfileView[]; account: AccountInfo | null }> =>
-    ipcRenderer.invoke(IPC.ProfilesSetActive, id),
+  setActiveProfile: (id: string): Promise<SwitchResult> => ipcRenderer.invoke(IPC.ProfilesSetActive, id),
+  setProfilePassword: (id: string, password: string): Promise<ProfileView[]> =>
+    ipcRenderer.invoke(IPC.ProfilesSetPassword, id, password),
+  forgetProfilePassword: (id: string): Promise<ProfileView[]> =>
+    ipcRenderer.invoke(IPC.ProfilesForgetPassword, id),
   refreshProfileInfo: (id: string): Promise<{ profiles: ProfileView[]; account: AccountInfo | null }> =>
     ipcRenderer.invoke(IPC.ProfilesRefreshInfo, id),
   setProfileStateDir: (id: string, dir: string): Promise<ProfileView[]> =>

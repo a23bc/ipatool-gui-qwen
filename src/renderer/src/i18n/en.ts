@@ -228,6 +228,12 @@ export const en = {
   'accounts.removedDir': 'Account removed; its session data was deleted',
   'accounts.keptDir': 'Account removed; the custom directory was kept on disk',
 
+  'auth.rememberPassword': 'Remember the password (encrypted on this machine) so switching back to this account is one click',
+  'accounts.hasPassword': 'password stored',
+  'accounts.forgetPassword': 'Forget stored password',
+  'accounts.needs2fa': 'Apple asked for a two-factor code; finish signing in to this account',
+  'accounts.darwinNote': 'On macOS, ipatool keeps credentials in the system Keychain, which holds one machine-wide session. Switching therefore re-signs-in the target account automatically when its password is stored; otherwise you sign in again after switching.',
+
   /* ---------------- downloads ---------------- */
   'downloads.title': 'Downloads',
   'downloads.empty.title': 'No downloads',

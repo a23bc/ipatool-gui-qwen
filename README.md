@@ -84,9 +84,21 @@ downloading  21% [======>       ] (12/45 MB, 1.2 MB/s)
 
 ### 多账户是怎么做的
 
-ipatool 把唯一会话（keyring 文件 + cookie jar）放在状态目录里，而该目录在**所有平台**上都由
-`XDG_STATE_HOME` / `XDG_DATA_HOME` 决定（见上游 `cmd/state_directory.go`）。因此每个账户对应一个
-独立状态目录，调用时按 profile 注入环境变量即可：
+先说一个上游的硬限制：ipatool 的凭据后端按 **macOS Keychain → Linux SecretService → 文件**
+的顺序选择（`cmd/common.go`）。前两者是**全机唯一**的槽位，与状态目录无关；只有文件后端才落在
+状态目录里。因此各平台的隔离能力不同：
+
+| 平台 | 凭据后端 | 多账户模型 |
+| --- | --- | --- |
+| Windows | 文件（每目录一份） | 真隔离：切换即换目录 |
+| Linux | 本应用剥离 D-Bus 后强制文件后端 | 真隔离：切换即换目录 |
+| macOS | 系统钥匙串（全机一份） | **切换 = 自动重新登录目标账户**；勾选「记住密码」后一键完成 |
+
+在此之上：
+
+- cookie jar 始终在状态目录里，而该目录在**所有平台**上都由
+  `XDG_STATE_HOME` / `XDG_DATA_HOME` 决定（见上游 `cmd/state_directory.go`），
+  因此每个账户对应一个独立状态目录，调用时按 profile 注入环境变量：
 
 - 切换账户不需要退出另一个账户；
 - 下载队列项记录创建时的 profile id，切换账户后**不会**用错误会话续传或误购；
@@ -95,7 +107,10 @@ ipatool 把唯一会话（keyring 文件 + cookie jar）放在状态目录里，
 - 启动时一次性把上游遗留的 `~/.ipatool` 迁移进默认 profile。这一步必须由我们自己做：
   上游迁移逻辑在「遗留目录存在且 XDG 目标已存在」时会**回退到遗留目录**（导致所有账户共用
   一个会话），在「目标不存在」时又会把遗留目录搬给第一个运行的 profile；
-- 顶栏账户按钮是**一键切换**的下拉菜单；增删改与重命名在账户管理器里。
+- 顶栏账户按钮是**一键切换**的下拉菜单；增删改与重命名在账户管理器里；
+- 「记住密码」为**逐账户可选**：用 Electron safeStorage 加密存于独立文件（不进 settings.json），
+  仅在切换时以 `-p` 传给本地 ipatool 并被日志脱敏；管理器中可随时「忘记」；
+- macOS 的钥匙串限制会在账户管理器顶部以醒目提示说明，避免误以为隔离失效是 bug。
 
 ### 性能与流畅性
 
@@ -136,6 +151,9 @@ ipatool 把唯一会话（keyring 文件 + cookie jar）放在状态目录里，
 > | Actions → Release → Run workflow | 同上；勾选 `publish` 才会额外创建 **Draft** Release |
 >
 > artifact 按「平台+架构」拆分上传：只想要 Linux x64 时不必把 arm64 或别的平台一起下载。
+> 注意：**GitHub 的 artifact 下载永远是 zip 容器**（平台行为，无法更改）。要拿原始文件
+> （安装包/运行包本身），请用同一次运行自动创建的 **Draft Release** 的资产区——Draft 不公开，
+> 只有仓库协作者可见，手动点 Publish 才会对外。
 > macOS 在 CI 上产 **`.app.tar.gz` 运行包**（GitHub 的 macOS runner 无法运行 dmg 所需的
 > `hdiutil attach`，会报 `Device not configured`，故用 `dir` target + tar）；
 > 在真实 Mac 上 `npm run dist:mac` 仍会产 dmg 安装包。
