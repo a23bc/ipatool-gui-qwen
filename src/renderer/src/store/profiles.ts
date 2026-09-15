@@ -35,14 +35,14 @@ export const useProfilesStore = create<ProfilesState>()((set) => ({
   busy: null,
 
   async load() {
-    const profiles = await window.api.listProfiles()
+    const profiles = asProfileViews(await window.api.listProfiles())
     set({ profiles, loaded: true })
   },
 
   async add(name) {
     set({ busy: 'add' })
     try {
-      const profiles = await window.api.addProfile(name)
+      const profiles = asProfileViews(await window.api.addProfile(name))
       set({ profiles })
       // A brand-new profile has no session yet: go straight to login so the
       // flow is one click from "add account" to signed in.
@@ -54,12 +54,12 @@ export const useProfilesStore = create<ProfilesState>()((set) => ({
   },
 
   async rename(id, name) {
-    const profiles = await window.api.renameProfile(id, name)
+    const profiles = asProfileViews(await window.api.renameProfile(id, name))
     set({ profiles })
   },
 
   async setStateDir(id, dir) {
-    const profiles = await window.api.setProfileStateDir(id, dir)
+    const profiles = asProfileViews(await window.api.setProfileStateDir(id, dir))
     set({ profiles })
   },
 
@@ -67,7 +67,7 @@ export const useProfilesStore = create<ProfilesState>()((set) => ({
     set({ busy: id })
     try {
       const result = await window.api.removeProfile(id)
-      set({ profiles: result.profiles })
+      set({ profiles: asProfileViews(result.profiles) })
       const { t } = useAppStore.getState()
       useUiStore.getState().toast({
         kind: 'info',
@@ -88,7 +88,7 @@ export const useProfilesStore = create<ProfilesState>()((set) => ({
     set({ busy: id })
     try {
       const result = await window.api.setActiveProfile(id)
-      set({ profiles: result.profiles })
+      set({ profiles: asProfileViews(result.profiles) })
       useAppStore.getState().setAccount(result.account)
       if (result.needs2fa) {
         const { t } = useAppStore.getState()
@@ -109,12 +109,12 @@ export const useProfilesStore = create<ProfilesState>()((set) => ({
   },
 
   async storePassword(id, password) {
-    const profiles = await window.api.setProfilePassword(id, password)
+    const profiles = asProfileViews(await window.api.setProfilePassword(id, password))
     set({ profiles })
   },
 
   async forgetPassword(id) {
-    const profiles = await window.api.forgetProfilePassword(id)
+    const profiles = asProfileViews(await window.api.forgetProfilePassword(id))
     set({ profiles })
   },
 
@@ -122,7 +122,7 @@ export const useProfilesStore = create<ProfilesState>()((set) => ({
     set({ busy: id })
     try {
       const result = await window.api.refreshProfileInfo(id)
-      set({ profiles: result.profiles })
+      set({ profiles: asProfileViews(result.profiles) })
       const target = result.profiles.find((profile) => profile.id === id)
       if (target?.active) {
         useAppStore.getState().setAccount(result.account as AccountInfo | null)
@@ -133,6 +133,5 @@ export const useProfilesStore = create<ProfilesState>()((set) => ({
   }
 }))
 
-export function activeProfile(profiles: ProfileView[]): ProfileView | null {
-  return profiles.find((profile) => profile.active) ?? profiles[0] ?? null
-}
+export { asProfileViews, activeProfile } from '@shared/profiles'
+import { asProfileViews } from '@shared/profiles'

@@ -147,10 +147,9 @@ export function registerIpc(): void {
     // A brand-new profile has no session; clear the cached account so the login
     // dialog never shows the previous profile's identity.
     await migrateLegacyState().catch(() => null)
-    const added = profiles.add(String(name ?? ''))
+    profiles.add(String(name ?? ''))
     setAccount(null)
-    // Remember which account we came from so silent switching can restore it.
-    return { profiles: await profileViews(), addedId: added.id }
+    return profileViews()
   })
 
   ipcMain.handle(IPC.ProfilesSetPassword, async (_e, id: string, password: string) => {
