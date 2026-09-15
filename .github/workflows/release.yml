@@ -36,6 +36,11 @@ jobs:
           - os: ubuntu-22.04
             platform: linux
     runs-on: ${{ matrix.os }}
+    # Windows runners default to PowerShell, which breaks the Unix tooling used
+    # below (ls, line continuations). bash ships on all three runner images.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -96,16 +101,30 @@ jobs:
         run: ls -lh release/
 
       # Makes it obvious from the run page what was produced and where it goes.
+      # Pure node so it behaves identically on every OS and shell.
       - name: Add artifact list to job summary
         run: |
-          {
-            echo "## Artifacts — ${{ matrix.platform }}"
-            echo
-            ls -lh release/ | awk 'NR>1 && $9 != "" {print "- `" $9 "` (" $5 ")"}'
-            echo
-            echo "Download these from **Artifacts** on this run. Nothing is published"
-            echo "unless the *publish* job runs (opt-in checkbox on manual dispatch)."
-          } >> "$GITHUB_STEP_SUMMARY"
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const dir = "release";
+            const rows = fs.readdirSync(dir)
+              .map((name) => ({ name, full: path.join(dir, name) }))
+              .filter((r) => fs.statSync(r.full).isFile())
+              .map((r) => ({ name: r.name, size: fs.statSync(r.full).size }))
+              .sort((a, b) => b.size - a.size);
+            const mb = (n) => (n / 1024 / 1024).toFixed(1) + " MB";
+            const lines = [
+              "## Artifacts - ${{ matrix.platform }}", "",
+              ...rows.map((r) => "- `" + r.name + "` (" + mb(r.size) + ")"),
+              "",
+              "Download these from **Artifacts** on this run. Nothing is published",
+              "unless the *publish* job runs (opt-in checkbox on manual dispatch).", ""
+            ];
+            const text = lines.join("\n");
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text);
+            console.log(text);
+          '
 
       - uses: actions/upload-artifact@v4
         with:
