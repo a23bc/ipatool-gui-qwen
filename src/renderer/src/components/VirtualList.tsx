@@ -21,6 +21,11 @@ export interface VirtualListProps<T> {
    * exactly the "output looks incomplete" symptom.
    */
   dynamic?: boolean
+  /**
+   * Called with the index range currently mounted. Used for windowed fetching
+   * (e.g. resolving metadata only for rows the user can actually see).
+   */
+  onVisibleRange?: (range: { start: number; end: number }) => void
 }
 
 /**
@@ -39,7 +44,8 @@ export function VirtualList<T>({
   className = '',
   onNearEnd,
   empty,
-  dynamic = false
+  dynamic = false,
+  onVisibleRange
 }: VirtualListProps<T>): ReactNode {
   const scrollRef = useRef<HTMLDivElement>(null)
   const nearEndFired = useRef(false)
@@ -69,6 +75,13 @@ export function VirtualList<T>({
 
   const virtualItems = virtualizer.getVirtualItems()
   const last = virtualItems[virtualItems.length - 1]
+
+  const firstIndex = virtualItems[0]?.index ?? -1
+  const lastIndex = last?.index ?? -1
+
+  useEffect(() => {
+    if (lastIndex >= 0) onVisibleRange?.({ start: firstIndex, end: lastIndex })
+  }, [firstIndex, lastIndex, onVisibleRange])
 
   if (onNearEnd && last && last.index >= items.length - 4 && !nearEndFired.current) {
     nearEndFired.current = true

@@ -76,7 +76,12 @@ export function AuthModal(): ReactNode {
     setBusy(true)
     setFailure(null)
 
-    const result = await window.api.login(email.trim(), password, step === 'code' ? code.trim() : undefined)
+    const result = await window.api.login(
+      email.trim(),
+      password,
+      step === 'code' ? code.trim() : undefined,
+      profile?.id
+    )
 
     setBusy(false)
 

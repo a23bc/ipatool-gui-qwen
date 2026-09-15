@@ -23,6 +23,21 @@ import type { Profile } from '../shared/types'
 import { expandUserPath } from './paths'
 import { settingsStore } from './settings'
 
+/**
+ * Synchronous mirrors of state that must never be read stale.
+ *
+ * `activeId` lives here (not only in settings.json) because the active profile
+ * decides which session directory every ipatool invocation uses; reading it
+ * through the settings object exposed us to normalization/override interleaving
+ * and once sent a login into the wrong profile.
+ *
+ * `sessionEmail` records what ipatool's session actually reported per profile, so
+ * a mismatch with the profile's recorded e-mail can be surfaced instead of
+ * silently acting as the wrong account.
+ */
+let activeIdCache: string | null = null
+const sessionEmail = new Map<string, string | null>()
+
 /** Root for state directories this app manages itself. */
 export function profilesRoot(): string {
   return path.join(app.getPath('userData'), 'profiles')
@@ -54,8 +69,21 @@ export function get(id: string): Profile | null {
 }
 
 export function active(): Profile {
+  const fromCache = activeIdCache ? get(activeIdCache) : null
+  if (fromCache) return fromCache
   const settings = settingsStore.getInternal()
-  return get(settings.activeProfileId) ?? list()[0] ?? ensureDefault()
+  const profile = get(settings.activeProfileId) ?? list()[0] ?? ensureDefault()
+  activeIdCache = profile.id
+  return profile
+}
+
+/** Records which e-mail the profile's ipatool session actually reports. */
+export function noteSessionEmail(id: string, email: string | null): void {
+  sessionEmail.set(id, email)
+}
+
+export function recordedSessionEmail(id: string): string | null | undefined {
+  return sessionEmail.has(id) ? (sessionEmail.get(id) as string | null) : undefined
 }
 
 function newId(): string {
@@ -77,6 +105,7 @@ export function ensureDefault(): Profile {
     createdAt: Date.now(),
     lastUsedAt: Date.now()
   }
+  activeIdCache = profile.id
   settingsStore.override({
     ...settingsStore.getInternal(),
     profiles: [profile],
@@ -86,6 +115,7 @@ export function ensureDefault(): Profile {
 }
 
 function commit(profiles: Profile[], activeProfileId: string): void {
+  activeIdCache = activeProfileId
   settingsStore.override({ ...settingsStore.getInternal(), profiles, activeProfileId })
   void settingsStore.persistNow()
   settingsStore.emitChange()

@@ -183,6 +183,7 @@ export const en = {
   'versions.resolved': 'Version names resolved',
   'versions.explain':
     'ipatool lists versions as opaque external identifiers. Resolving calls get-version-metadata for each one to show the human version and release date; this is rate-limited and cached.',
+  'versions.lazyHint': 'Resolving on demand: {done}/{total} resolved. Scroll to resolve more; closing stops it.',
   'versions.downloadThis': 'Download this version',
   'versions.select': 'Select version to download',
   'versions.useLatest': 'Latest version',
@@ -490,6 +491,8 @@ export const en = {
   'errors.disk.hint': 'Check free space and write permission on the download folder.',
   'errors.engine-missing': 'The ipatool binary disappeared',
   'errors.engine-missing.hint': 'Re-detect or reinstall it in Settings → ipatool engine.',
+  'errors.session-mismatch': 'This profile\'s stored session no longer matches its account',
+  'errors.session-mismatch.hint': 'Switch to the profile and sign in again; the previous session belongs to another Apple ID.',
   'errors.canceled': 'Cancelled',
   'errors.canceled.hint': 'The operation was stopped before it finished.',
   'errors.unknown': 'ipatool reported an error',

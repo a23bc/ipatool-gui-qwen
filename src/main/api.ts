@@ -153,8 +153,28 @@ export class IpatoolApi {
     const passphrase = await settingsStore.effectivePassphrase()
 
     // Session isolation: every invocation runs against one profile's state dir.
-    const profile = profiles.get(options.profileId ?? '') ?? profiles.active()
+    // An explicit profileId is authoritative; the fallback is the synchronous
+    // in-memory active mirror, never a re-read of persisted settings.
+    const profile =
+      (options.profileId ? profiles.get(options.profileId) : null) ?? profiles.active()
     profiles.touch(profile.id)
+
+    // Guard against silently acting as the wrong account: if this profile's
+    // session was previously observed to belong to a different e-mail than the
+    // profile records, refuse and ask for a re-login.
+    if (options.kind !== 'login' && options.kind !== 'account') {
+      const observed = profiles.recordedSessionEmail(profile.id)
+      if (observed && profile.email && observed.toLowerCase() !== profile.email.toLowerCase()) {
+        throw new ApiError(
+          `Session mismatch for ${profile.name}: stored ${profile.email}, session ${observed}`,
+          'session-mismatch',
+          'guard',
+          null,
+          false,
+          true
+        )
+      }
+    }
     const profileEnv = profiles.envFor(profile)
     await profiles.ensureDir(profile)
 
@@ -327,6 +347,7 @@ export class IpatoolApi {
         email: readString(success, 'email') || email
       }
       profiles.setInfo(target.id, account.email, account.name)
+      profiles.noteSessionEmail(target.id, account.email)
       return { status: 'ok', account, message: '', taskId }
     }
 
@@ -381,11 +402,13 @@ export class IpatoolApi {
       const info = await this.accountInfo(profileId)
       const target = profiles.get(profileId ?? '') ?? profiles.active()
       profiles.setInfo(target.id, info.email, info.name)
+      profiles.noteSessionEmail(target.id, info.email)
       return info
-    } catch (error) {
-      if (error instanceof ApiError && (error.code === 'not-signed-in' || error.code === 'passphrase-required')) {
-        return null
-      }
+    } catch {
+      profiles.noteSessionEmail(
+        (profiles.get(profileId ?? '') ?? profiles.active()).id,
+        null
+      )
       return null
     }
   }

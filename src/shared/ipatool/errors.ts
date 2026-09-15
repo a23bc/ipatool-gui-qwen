@@ -27,6 +27,7 @@ export type IpatoolErrorCode =
   | 'platform-mismatch'
   | 'disk'
   | 'engine-missing'
+  | 'session-mismatch'
   | 'canceled'
   | 'unknown'
 
@@ -195,6 +196,11 @@ const RULES: Rule[] = [
   {
     code: 'engine-missing',
     patterns: [/ENOENT/i, /no such file or directory/i, /is not recognized/i],
+    actionable: true
+  },
+  {
+    code: 'session-mismatch',
+    patterns: [/session mismatch for/i],
     actionable: true
   },
   {

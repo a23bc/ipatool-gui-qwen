@@ -179,6 +179,7 @@ export const zh: Dict = {
   'versions.resolved': '版本号解析完成',
   'versions.explain':
     'ipatool 返回的版本是不透明的外部标识符。解析会逐个调用 get-version-metadata 取得可读版本号和发布日期；已做并发限制和缓存。',
+  'versions.lazyHint': '按需解析中：{done}/{total}。向下滚动继续解析；关闭窗口立即停止。',
   'versions.downloadThis': '下载此版本',
   'versions.select': '选择要下载的版本',
   'versions.useLatest': '最新版本',
@@ -476,6 +477,8 @@ export const zh: Dict = {
   'errors.disk.hint': '检查下载目录的剩余空间和写入权限。',
   'errors.engine-missing': 'ipatool 可执行文件丢失',
   'errors.engine-missing.hint': '在 设置 → ipatool 引擎 中重新检测或重新安装。',
+  'errors.session-mismatch': '该 profile 的会话与其账户不再匹配',
+  'errors.session-mismatch.hint': '请切换到该 profile 重新登录；当前会话属于另一个 Apple ID。',
   'errors.canceled': '已取消',
   'errors.canceled.hint': '操作在完成前被中止。',
   'errors.unknown': 'ipatool 返回了错误',
