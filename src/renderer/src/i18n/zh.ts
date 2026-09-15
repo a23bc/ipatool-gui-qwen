@@ -328,7 +328,7 @@ export const zh: Dict = {
   'settings.engine.uninstallHelp': '只删除本程序自己下载的那一份。',
   'settings.engine.mirror': 'GitHub 下载镜像',
   'settings.engine.mirrorHelp':
-    '会作为前缀拼到 github.com 资源地址前，例如 https://gh-proxy.com。留空表示直连。',
+    '会作为前缀拼到 github.com 地址前（版本元数据与下载都走它），例如 https://gh-proxy.com。留空表示直连。',
   'settings.engine.mirrorPlaceholder': 'https://gh-proxy.com',
   'settings.engine.info': '路径信息',
 

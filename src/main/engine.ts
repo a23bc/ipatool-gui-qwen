@@ -23,13 +23,29 @@ import { app } from 'electron'
 import type { EngineErrorCode, EngineRelease, EngineStatus } from '../shared/types'
 import { parseSha256Sum, parseVersion } from '../shared/ipatool/parse'
 import { findTarFile, parseTar } from '../shared/tar'
-import { applyMirror, describeHttpError, fetchBuffer, fetchJson, fetchText, HttpError } from './http'
+import {
+  applyMirror,
+  describeHttpError,
+  fetchBuffer,
+  fetchJson,
+  fetchText,
+  fetchTextWithFinalUrl,
+  HttpError
+} from './http'
 import { isExecutable, isWindows, lookupOnPath, managedBinaryPath, managedDir, resolveEngine } from './paths'
 import { run } from './runner'
 import { settingsStore } from './settings'
 
 const IPATOOL_REPO = 'majd/ipatool'
 const API = `https://api.github.com/repos/${IPATOOL_REPO}`
+const REPO_WEB = `https://github.com/${IPATOOL_REPO}`
+
+/**
+ * Last known good release, used only when neither the API nor the redirect
+ * trick can answer (offline API, blocked mirror, ...). Installing a slightly old
+ * ipatool beats failing to install any.
+ */
+const FALLBACK_VERSION = '2.6.0'
 
 interface GhAsset {
   name: string
@@ -180,23 +196,46 @@ export class EngineManager extends EventEmitter {
     return { ...extra }
   }
 
-  /** Lists published releases, newest first, flagging which have our asset. */
+  /**
+   * Lists published releases, newest first.
+   *
+   * Prefers the API, but falls back to scraping the releases page (mirror-aware)
+   * because api.github.com is the endpoint most likely to 403 on shared IPs.
+   */
   async releases(limit = 25): Promise<EngineRelease[]> {
-    const releases = await fetchJson<GhRelease[]>(`${API}/releases?per_page=${limit}`)
     const tokens = platformTokens()
 
-    return releases
-      .map((release) => {
-        const version = release.tag_name.replace(/^v/, '')
-        const asset = tokens ? `ipatool-${version}-${tokens.os}-${tokens.arch}.tar.gz` : ''
-        return {
-          version,
-          publishedAt: release.published_at,
-          prerelease: release.prerelease,
-          hasAssetForThisPlatform: asset !== '' && release.assets.some((a) => a.name === asset)
-        }
-      })
-      .filter((entry) => entry.version !== '')
+    try {
+      const releases = await fetchJson<GhRelease[]>(`${API}/releases?per_page=${limit}`)
+      return releases
+        .map((release) => {
+          const version = release.tag_name.replace(/^v/, '')
+          const asset = tokens ? `ipatool-${version}-${tokens.os}-${tokens.arch}.tar.gz` : ''
+          return {
+            version,
+            publishedAt: release.published_at,
+            prerelease: release.prerelease,
+            hasAssetForThisPlatform: asset !== '' && release.assets.some((a) => a.name === asset)
+          }
+        })
+        .filter((entry) => entry.version !== '')
+    } catch {
+      const mirror = settingsStore.getInternal().githubMirror.trim()
+      const url = mirror !== '' ? applyMirror(`${REPO_WEB}/releases`, mirror) : `${REPO_WEB}/releases`
+      const { text } = await fetchTextWithFinalUrl(url)
+      const tags: string[] = []
+      for (const match of text.matchAll(/\/releases\/tag\/v?([\w.-]+)/g)) {
+        const tag = match[1]
+        if (tag && !tags.includes(tag)) tags.push(tag)
+        if (tags.length >= limit) break
+      }
+      return tags.map((version) => ({
+        version,
+        publishedAt: null,
+        prerelease: /rc|beta|alpha/i.test(version),
+        hasAssetForThisPlatform: tokens !== null
+      }))
+    }
   }
 
   /**
@@ -220,21 +259,15 @@ export class EngineManager extends EventEmitter {
       try {
         this.set(status('downloading', { download: { received: 0, total: null, percent: null, phase: 'resolve' } }))
 
-        const release = await this.resolveRelease(version)
-        const tag = release.tag_name.replace(/^v/, '')
-        const assetName = `ipatool-${tag}-${tokens.os}-${tokens.arch}.tar.gz`
-        const asset = release.assets.find((a) => a.name === assetName)
+        const resolved = await this.resolveVersion(version)
+        const tag = resolved.version
+        const urls = this.assetUrls(tag)
 
-        if (!asset) {
-          throw new EngineError(
-            `Release ${release.tag_name} has no ${assetName} asset`,
-            'download-failed'
-          )
+        if (!urls) {
+          throw new EngineError('No ipatool build for this platform', 'unsupported-arch')
         }
 
-        const mirror = settingsStore.getInternal().githubMirror
-        const downloadUrl = applyMirror(asset.browser_download_url, mirror)
-        const checksumUrl = applyMirror(`${asset.browser_download_url}.sha256sum`, mirror)
+        const { downloadUrl, checksumUrl } = urls
 
         // The checksum is fetched first so a missing sidecar fails fast and
         // loudly instead of after a 20 MB download.
@@ -245,7 +278,8 @@ export class EngineManager extends EventEmitter {
           expectedHash = null
         }
 
-        const total = asset.size > 0 ? asset.size : null
+        // Size is unknown until headers arrive; fetchBuffer reports it.
+        const total: number | null = null
         const archive = await fetchBuffer(downloadUrl, {
           onProgress: (received, streamedTotal) => {
             const size = streamedTotal ?? total
@@ -282,7 +316,12 @@ export class EngineManager extends EventEmitter {
             path: binary,
             version: installedVersion ?? tag,
             source: 'managed',
-            message: expectedHash ? null : 'Installed without checksum verification (sidecar unavailable)'
+            message:
+              resolved.source === 'fallback'
+                ? `GitHub could not be queried; installed the last known good version ${tag}`
+                : expectedHash
+                  ? null
+                  : 'Installed without checksum verification (sidecar unavailable)'
           })
         )
       } catch (error) {
@@ -304,16 +343,68 @@ export class EngineManager extends EventEmitter {
     return this.installing
   }
 
-  private async resolveRelease(version: string): Promise<GhRelease> {
-    const wanted = version.trim().replace(/^v/, '')
-    if (wanted) {
-      return fetchJson<GhRelease>(`${API}/releases/tags/v${wanted}`)
-    }
+  /**
+   * Resolves which ipatool version to install, without depending on the GitHub
+   * API being reachable:
+   *   1. explicit argument (settings picker / manual install),
+   *   2. pinned version from settings,
+   *   3. the /releases/latest redirect (mirror-aware, API-free),
+   *   4. the built-in last-known-good version.
+   */
+  private async resolveVersion(version: string): Promise<{ version: string; source: string }> {
+    const explicit = version.trim().replace(/^v/, '')
+    if (explicit !== '') return { version: explicit, source: 'explicit' }
+
     const pinned = settingsStore.getInternal().engineVersion.trim().replace(/^v/, '')
-    if (pinned) {
-      return fetchJson<GhRelease>(`${API}/releases/tags/v${pinned}`)
+    if (pinned !== '') return { version: pinned, source: 'pinned' }
+
+    const discovered = await this.discoverLatest()
+    if (discovered) return { version: discovered, source: 'latest' }
+
+    return { version: FALLBACK_VERSION, source: 'fallback' }
+  }
+
+  /** Mirror-aware "what is newest" lookup via the releases/latest redirect. */
+  private async discoverLatest(): Promise<string | null> {
+    const mirror = settingsStore.getInternal().githubMirror.trim()
+    const candidates = [
+      mirror !== '' ? applyMirror(`${REPO_WEB}/releases/latest`, mirror) : null,
+      `${REPO_WEB}/releases/latest`
+    ]
+
+    for (const url of candidates) {
+      if (!url) continue
+      try {
+        const { text, url: finalUrl } = await fetchTextWithFinalUrl(url)
+        const fromUrl = finalUrl.match(/\/releases\/tag\/v?([\w.-]+)/)?.[1]
+        if (fromUrl) return fromUrl
+        const fromBody = text.match(/\/releases\/tag\/v?([\w.-]+)/)?.[1]
+        if (fromBody) return fromBody
+      } catch {
+        /* try the next candidate */
+      }
     }
-    return fetchJson<GhRelease>(`${API}/releases/latest`)
+    return null
+  }
+
+  /**
+   * Deterministic asset URLs.
+   *
+   * Release assets follow a fixed naming scheme, so neither the asset list nor
+   * its size needs the API: the size arrives as Content-Length during download,
+   * which is all the progress bar needs.
+   */
+  private assetUrls(version: string): { assetName: string; downloadUrl: string; checksumUrl: string } | null {
+    const tokens = platformTokens()
+    if (!tokens) return null
+    const assetName = `ipatool-${version}-${tokens.os}-${tokens.arch}.tar.gz`
+    const base = `${REPO_WEB}/releases/download/v${version}/${assetName}`
+    const mirror = settingsStore.getInternal().githubMirror.trim()
+    return {
+      assetName,
+      downloadUrl: applyMirror(base, mirror),
+      checksumUrl: applyMirror(`${base}.sha256sum`, mirror)
+    }
   }
 
   /** Gunzips, untars and installs the binary into the managed directory. */

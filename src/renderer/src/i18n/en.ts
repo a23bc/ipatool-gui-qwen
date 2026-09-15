@@ -334,7 +334,7 @@ export const en = {
   'settings.engine.uninstallHelp': 'Only deletes the copy this app downloaded.',
   'settings.engine.mirror': 'GitHub download mirror',
   'settings.engine.mirrorHelp':
-    'Prefix prepended to github.com asset URLs, for proxies such as https://gh-proxy.com. Leave empty for a direct connection.',
+    'Prefix prepended to github.com URLs (release metadata AND downloads), for proxies such as https://gh-proxy.com. Leave empty for a direct connection.',
   'settings.engine.mirrorPlaceholder': 'https://gh-proxy.com',
   'settings.engine.info': 'Paths',
 

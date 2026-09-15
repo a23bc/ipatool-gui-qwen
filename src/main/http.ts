@@ -91,6 +91,30 @@ export async function fetchText(url: string, options: FetchOptions = {}): Promis
   return Buffer.from(bytes).toString('utf8')
 }
 
+/**
+ * Fetches text and reports the final URL after redirects.
+ *
+ * Used to discover the newest ipatool release without the GitHub *API*:
+ * github.com/<repo>/releases/latest redirects to /releases/tag/vX.Y.Z, and the
+ * plain site is both less rate-limited and proxy-friendly compared to
+ * api.github.com (which 403s heavily on shared/NAT IPs).
+ */
+export async function fetchTextWithFinalUrl(
+  url: string,
+  options: FetchOptions = {}
+): Promise<{ text: string; url: string }> {
+  const response = await fetchImpl()(url, {
+    signal: options.signal,
+    redirect: 'follow',
+    headers: { 'User-Agent': USER_AGENT, ...(options.headers ?? {}) }
+  })
+  if (!response.ok) {
+    throw new HttpError(`HTTP ${response.status} ${response.statusText || ''}`.trim(), response.status, url)
+  }
+  const text = await response.text()
+  return { text, url: response.url }
+}
+
 export async function fetchJson<T>(url: string, options: FetchOptions = {}): Promise<T> {
   const text = await fetchText(url, {
     ...options,
