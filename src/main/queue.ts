@@ -28,6 +28,7 @@ import { MovingAverage } from '../shared/format'
 import { mergeProgress, type ProgressSample } from '../shared/ipatool/parse'
 import { classifyError, shorten } from '../shared/ipatool/errors'
 import { ApiError, ipatoolApi } from './api'
+import { accounts } from './accounts'
 import { settingsStore } from './settings'
 import { taskRegistry } from './tasks'
 
@@ -113,6 +114,10 @@ export class DownloadQueue extends EventEmitter {
       purchase: raw.purchase !== false,
       outputDir: String(raw.outputDir ?? settingsStore.getInternal().downloadDir),
       state: (raw.state as QueueState) ?? 'paused',
+      // Preserved verbatim: a download must finish as the account that started
+      // it, and an item saved by an older version has no account at all - it then
+      // falls back to whoever is active when it is resumed.
+      accountId: typeof raw.accountId === 'string' ? raw.accountId : '',
       progress: {
         received: Number(progress?.received ?? 0),
         total: typeof progress?.total === 'number' ? progress.total : null,
@@ -189,14 +194,22 @@ export class DownloadQueue extends EventEmitter {
       const platform = (request.platform ?? settings.defaultPlatform ?? '') as Platform
       const externalVersionID = String(request.externalVersionID ?? '')
       const outputDir = request.outputDir?.trim() || settings.downloadDir
+      // Pin the account now, not at start time: the user may switch accounts
+      // while the item is queued, and the download - and any purchase it triggers
+      // - has to happen on the account that was selected when it was added.
+      const accountId = request.accountId?.trim() || accounts.activeId
 
-      // De-duplicate: the same app + version + platform is already tracked.
+      // De-duplicate: the same app + version + platform + account is already
+      // tracked. Including the account matters: the same app is a different
+      // download for a different Apple ID (different licences, different
+      // storefront), so it must not be collapsed into one row.
       const existing = this.items.find(
         (item) =>
           item.appId === appId &&
           item.bundleID === bundleID &&
           item.externalVersionID === externalVersionID &&
           item.platform === platform &&
+          item.accountId === accountId &&
           item.state !== 'done' &&
           item.state !== 'canceled'
       )
@@ -210,6 +223,7 @@ export class DownloadQueue extends EventEmitter {
         id,
         // Remember the account: resuming under a different session would fail
         // (or worse, purchase under the wrong Apple ID).
+        accountId,
         appId,
         bundleID,
         name: request.name?.trim() || bundleID || `App ${appId}`,

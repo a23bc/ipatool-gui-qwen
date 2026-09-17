@@ -237,18 +237,12 @@ export class EngineManager extends EventEmitter {
   /**
    * Base env for ipatool invocations.
    *
-   * Session isolation (XDG_STATE_HOME) is supplied per call by the profile layer;
+   * Session isolation is supplied per call by the account registry
+   * (`accounts.acquire`), which owns the state directory and the home sandbox;
    * this only exists so callers have one place to add process-wide variables.
    */
   childEnv(extra: Record<string, string> = {}): Record<string, string> {
-    const env = { ...extra }
-    const stateDir = settingsStore.getInternal().stateDir.trim()
-    if (stateDir !== '') {
-      // ipatool honours XDG_STATE_HOME on every platform, which lets the GUI keep
-      // its session separate from the terminal CLI's.
-      env.XDG_STATE_HOME = stateDir
-    }
-    return env
+    return { ...extra }
   }
 
   /**

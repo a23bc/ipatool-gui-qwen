@@ -5,6 +5,7 @@ import { useQueueStore } from '@renderer/store/queue'
 import { useTasksStore } from '@renderer/store/tasks'
 import { useUiStore, VIEWS, type View } from '@renderer/store/ui'
 import { CommandPalette } from '@renderer/components/CommandPalette'
+import { AccountManager } from '@renderer/components/AccountManager'
 import { ConfirmDialog } from '@renderer/components/ConfirmDialog'
 import { EngineSetup } from '@renderer/components/EngineSetup'
 import { Header, StatusBar } from '@renderer/components/Header'
@@ -120,6 +121,7 @@ export function App(): ReactNode {
       {/* Overlays. Order matters for stacking: drawer under palette. */}
       {versionsFor ? <VersionsDrawer /> : null}
       <EngineSetup />
+      <AccountManager />
       <AuthModal />
       <CommandPalette />
       <ConfirmDialog />

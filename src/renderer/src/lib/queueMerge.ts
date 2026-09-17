@@ -32,6 +32,9 @@ export function itemSignature(item: QueueItem): string {
     item.error?.hint ?? '',
     item.purchase ? 1 : 0,
     item.taskId ?? '',
+    // Which Apple ID the download runs as: constant for the life of an item, but
+    // part of the signature so a row can never show a stale account label.
+    item.accountId,
     // `total` is structural: it flips a row from indeterminate to determinate.
     item.progress.total ?? ''
   ].join('|')

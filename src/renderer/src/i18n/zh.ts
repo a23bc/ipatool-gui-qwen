@@ -107,6 +107,7 @@ export const zh: Dict = {
   'auth.signOut': '退出登录',
   'auth.title': '登录 App Store',
   'auth.subtitle': '凭据直接交给 ipatool，由它存入系统钥匙串。本程序不会保存你的密码。',
+  'auth.subtitleNew': '正在登录「{name}」。每个账户各自持有一份会话，之后来回切换不会把其他账户挤下线。',
   'auth.email': 'Apple ID 邮箱',
   'auth.password': '密码',
   'auth.emailPlaceholder': 'you@example.com',
@@ -130,6 +131,50 @@ export const zh: Dict = {
   'auth.account.refresh': '重新检查会话',
   'auth.required.title': '需要登录',
   'auth.required.body': '搜索、查看版本历史和下载都需要已认证的 App Store 会话。请先登录。',
+
+  /* ---------------- accounts ---------------- */
+  'accounts.title': '账户',
+  'accounts.subtitle': '每个账户拥有一份彼此独立的 App Store 会话。',
+  'accounts.count': '{n} 个账户',
+  'accounts.unnamed': '未命名账户',
+  'accounts.empty': '还没有账户。',
+  'accounts.add': '添加账户',
+  'accounts.manage': '管理账户',
+  'accounts.switch': '切换',
+  'accounts.switched': '已切换账户',
+  'accounts.switchFailed': '无法切换到该账户',
+  'accounts.verify': '重新检查',
+  'accounts.verified': '会话有效',
+  'accounts.verifyFailed': '无法校验该会话',
+  'accounts.refreshAll': '全部重新检查',
+  'accounts.remark': '备注…',
+  'accounts.remarkPlaceholder': '写点什么以便区分这些账户（可选）',
+  'accounts.reveal': '目录',
+  'accounts.remove': '移除',
+  'accounts.remove.title': '要移除这个账户吗？',
+  'accounts.remove.body':
+    '「{name}」在本机的会话目录、已保存的凭据和下载记录都会被删除。Apple ID 本身不受影响。',
+  'accounts.remove.confirm': '移除账户',
+  'accounts.remove.done': '账户已移除',
+  'accounts.remove.disabled': '请先切换到其他账户再移除它。',
+  'accounts.row.noSession': '无会话 — 请登录',
+  'accounts.badge.active': '当前',
+  'accounts.badge.noSession': '未登录',
+  'accounts.badge.conflict': '身份冲突',
+  'accounts.conflict.foreign-session': '该账户的会话目前属于另一个 Apple ID。重新登录即可恢复。',
+  'accounts.conflict.unreadable-slot':
+    '已保存的凭据无法读回，因此再次切换回该账户时需要重新输入密码。',
+  'accounts.store.file': '独立凭据',
+  'accounts.store.os': '共享钥匙串',
+  'accounts.slot.perAccount': '每个账户各自保存一份加密凭据，登录其中一个不会影响其他账户。',
+  'accounts.slot.sharedManaged':
+    'macOS 把 ipatool 的凭据放在登录钥匙串的同一个条目里，所有 ipatool 进程共用。本程序会在使用前把当前账户写入该条目，同时为每个账户保留一份加密副本，因此切换无需重新输入密码。',
+  'accounts.slot.sharedUnmanaged':
+    'macOS 把 ipatool 的凭据放在登录钥匙串的同一个条目里，而本程序在当前环境下无法接管它，因此切换回某个账户需要重新登录。',
+  'accounts.legacy.adopted':
+    '发现已存在的 ~/.ipatool 会话，已将其收作第一个账户 —— 否则 ipatool 会让所有账户共用这一份会话。',
+  'accounts.legacy.quarantined':
+    '发现已存在的 ~/.ipatool 会话，已移动到 {path}，以免被多个账户共用。没有删除任何文件。',
 
   /* ---------------- search ---------------- */
   'search.placeholder': '按名称、开发者或 Bundle ID 搜索 App Store…',
@@ -310,15 +355,17 @@ export const zh: Dict = {
 
   'settings.account.passphrase': '钥匙串口令',
   'settings.account.passphraseHelp':
-    'ipatool 会把 Apple 凭据加密存放在钥匙串文件里。在 Windows（以及没有 secret service 的 Linux）上需要口令。选择「托管」会自动生成一个并存入系统钥匙串，你完全不用管。',
+    'ipatool 会把 Apple 凭据加密存放在钥匙串文件里。在 Windows（以及没有 secret service 的 Linux）上需要口令。选择「托管」会为每个账户各自生成一份口令并存入系统钥匙串，你完全不用管。',
   'settings.account.passphraseMode.auto': '托管（推荐）',
   'settings.account.passphraseMode.manual': '使用我自己的口令',
   'settings.account.passphraseMode.none': '不传口令（使用系统钥匙串）',
   'settings.account.passphraseValue': '口令',
   'settings.account.passphraseWarning':
     '如果你也在终端里用 ipatool，这里要填同一个口令，否则已保存的凭据无法解密。',
-  'settings.account.stateDir': '凭据目录（XDG_STATE_HOME）',
-  'settings.account.stateDirHelp': '留空表示与终端里的 ipatool 共用默认会话目录；填入路径则让本应用使用独立会话。',
+  'settings.accounts.help': '每个账户有自己的会话目录，登录其中一个不会把其他账户挤下线。',
+  'settings.account.isolateHome': '为每个账户隔离 HOME 目录',
+  'settings.account.isolateHomeHelp':
+    '只要 ~/.ipatool 存在，ipatool 就会优先使用它，从而让所有账户共用同一份会话。让每次调用跑在各自的 HOME 目录下即可消除这条回退路径。只有在它与未来的 ipatool 版本冲突时才需要关闭——关闭后本程序会改为把 ~/.ipatool 挪走。',
   'settings.account.verbose': 'ipatool 详细日志',
 
   'settings.downloads.dir': '下载目录',

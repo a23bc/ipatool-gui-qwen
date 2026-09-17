@@ -6,6 +6,7 @@ import { useQueueStore } from '@renderer/store/queue'
 import { useSearchStore } from '@renderer/store/search'
 import { useUiStore } from '@renderer/store/ui'
 import { Icon, Spinner } from './Icon'
+import { AccountSwitcher } from './AccountSwitcher'
 import { PlatformSelect } from './Badges'
 
 /** Reserved space for OS window controls, per platform. */
@@ -62,26 +63,6 @@ function EnginePill(): ReactNode {
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: colors.fg }} />
       )}
       <span className="max-w-[150px] truncate">{label}</span>
-    </button>
-  )
-}
-
-function AccountButton(): ReactNode {
-  const account = useAppStore((state) => state.account)
-  const t = useAppStore((state) => state.t)
-  const setAuthOpen = useUiStore((state) => state.setAuthOpen)
-
-  return (
-    <button
-      type="button"
-      className="no-drag btn btn-ghost h-[26px] gap-1.5 px-2"
-      onClick={() => setAuthOpen(true)}
-      title={account ? account.name || account.email : t('auth.signIn')}
-    >
-      <Icon name="user" size={13} />
-      <span className="max-w-[160px] truncate text-[11.5px]">
-        {account ? account.email : t('auth.signedOut')}
-      </span>
     </button>
   )
 }
@@ -186,7 +167,7 @@ export const Header = memo(function Header(): ReactNode {
       <span className="mx-0.5 h-4 w-px shrink-0" style={{ background: 'var(--border)' }} />
 
       <EnginePill />
-      <AccountButton />
+      <AccountSwitcher />
 
       <button
         type="button"
@@ -214,10 +195,15 @@ export const StatusBar = memo(function StatusBar(): ReactNode {
   const t = useAppStore((state) => state.t)
   const engine = useAppStore((state) => state.engine)
   const account = useAppStore((state) => state.account)
+  const accounts = useAppStore((state) => state.accounts)
   const appInfo = useAppStore((state) => state.appInfo)
   const stats = useQueueStore((state) => state.stats)
   const setPaletteOpen = useUiStore((state) => state.setPaletteOpen)
+  const setAccountsOpen = useUiStore((state) => state.setAccountsOpen)
   const padding = useChromePadding()
+
+  const activeView = accounts.accounts.find((view) => view.id === accounts.activeId)
+  const accountLabel = account ? account.email : t('auth.signedOut')
 
   return (
     <footer
@@ -238,9 +224,20 @@ export const StatusBar = memo(function StatusBar(): ReactNode {
         {t('statusbar.engine')}: {engine.version ?? t(`engine.state.${engine.state}`)}
       </span>
 
-      <span className="truncate">
-        {t('statusbar.account')}: {account ? account.email : t('auth.signedOut')}
-      </span>
+      <button
+        type="button"
+        className="no-drag flex min-w-0 items-center gap-1.5 truncate rounded px-1 py-0.5 transition-colors hover:bg-[var(--row-hover)]"
+        onClick={() => setAccountsOpen(true)}
+        title={activeView?.conflict ? t(`accounts.conflict.${activeView.conflict}`) : accountLabel}
+      >
+        {activeView?.conflict ? (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: 'var(--danger)' }} />
+        ) : null}
+        {t('statusbar.account')}: {accountLabel}
+        {accounts.accounts.length > 1 ? (
+          <span className="faint"> · {t('accounts.count', { n: accounts.accounts.length })}</span>
+        ) : null}
+      </button>
 
       <span className="truncate">
         {t('statusbar.queue')}: {stats.running > 0 ? t('statusbar.active', { n: stats.running }) : t('statusbar.idle')}

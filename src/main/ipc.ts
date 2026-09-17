@@ -11,6 +11,8 @@ import { BrowserWindow, clipboard, dialog, ipcMain, shell, nativeTheme, app, Not
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type {
+  AccountInfo,
+  AccountsSnapshot,
   AppInfoPayload,
   DownloadRequest,
   EngineStatus,
@@ -20,18 +22,20 @@ import type {
   RawRunRequest,
   Settings
 } from '../shared/types'
-import type { QueueAction } from '../shared/ipc'
+import type { QueueAction, SessionCheck } from '../shared/ipc'
 import { IPC } from '../shared/ipc'
 import { quoteCommand } from '../shared/format'
 import { redactArgs } from '../shared/redact'
 import { parseImportList } from '../shared/import'
 import { notificationBody } from '../shared/notifications'
 import { expandUserPath } from './paths'
+import { AccountError, accounts, assertAccountId } from './accounts'
 import { ApiError, ipatoolApi } from './api'
 import { artworkCache } from './artwork'
 import { downloadQueue } from './queue'
 import { engineManager, EngineError } from './engine'
 import { settingsStore } from './settings'
+import { afterLogin, refreshAll, switchTo, verifySession } from './session'
 import { taskRegistry } from './tasks'
 import { APP_PRODUCT, APP_VERSION, checkAppUpdate } from './update'
 import { syncTitleBarOverlay } from './window'
@@ -52,6 +56,12 @@ function failure(error: unknown, taskId = ''): OperationFailure {
       taskId: error.taskId || taskId,
       exitCode: error.exitCode
     }
+  }
+  if (error instanceof AccountError) {
+    // Account problems carry the same stable codes the i18n layer already
+    // translates (`profile-required`, `profile-not-found`, `session-mismatch`),
+    // so they reach the user as an explanation instead of a stack.
+    return { ok: false, error: error.message, hint: error.code, code: error.code, taskId, exitCode: null }
   }
   if (error instanceof EngineError) {
     return { ok: false, error: error.message, hint: error.code, code: error.code, taskId, exitCode: null }
@@ -128,11 +138,28 @@ function appInfo(): AppInfoPayload {
   }
 }
 
-let cachedAccount: { name: string; email: string } | null = null
+let cachedAccount: AccountInfo | null = null
 
-function setAccount(account: { name: string; email: string } | null): void {
-  cachedAccount = account
-  broadcast('account:changed', account)
+/**
+ * Publishes the account list and returns it.
+ *
+ * The whole snapshot is broadcast rather than a bare identity: the active
+ * account is what every ipatool command will run as, so the renderer has to see
+ * the active pointer, the per-account session state and any slot conflict
+ * together - a partial update could briefly show account A as active while the
+ * main process is already running as B.
+ */
+export async function publishAccounts(): Promise<AccountsSnapshot> {
+  const snapshot = await accounts.snapshot()
+  const active = snapshot.accounts.find((account) => account.id === snapshot.activeId)
+  cachedAccount = active && active.signedIn ? { name: active.name, email: active.email } : null
+  broadcast('accounts:changed', snapshot)
+  return snapshot
+}
+
+/** Cached identity of the active account, for the cheap `auth:account` read. */
+export function currentAccount(): AccountInfo | null {
+  return cachedAccount
 }
 
 export function registerIpc(): void {
@@ -170,26 +197,101 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.AppCheckUpdate, () => checkAppUpdate())
 
   /* ---------------------------------------------------------------- *
-   * auth
+   * accounts
    * ---------------------------------------------------------------- */
 
-  ipcMain.handle(IPC.AuthLogin, async (_e, email: string, password: string, authCode?: string) => {
-    const result = await ipatoolApi.login(String(email ?? ''), String(password ?? ''), authCode)
-    if (result.status === 'ok' && result.account) setAccount(result.account)
+  ipcMain.handle(IPC.AccountsGet, () => accounts.snapshot())
+
+  ipcMain.handle(IPC.AccountsAdd, async (_e, remark?: string) => {
+    accounts.add(typeof remark === 'string' ? remark : '')
+    return publishAccounts()
+  })
+
+  ipcMain.handle(IPC.AccountsActivate, async (_e, id: string) => {
+    const result = await switchTo(assertAccountId(id))
+    const snapshot = result.snapshot
+    const active = snapshot.accounts.find((account) => account.id === snapshot.activeId)
+    cachedAccount = active && active.signedIn ? { name: active.name, email: active.email } : null
+    broadcast('accounts:changed', snapshot)
     return result
   })
 
-  ipcMain.handle(IPC.AuthAccount, () => cachedAccount)
+  ipcMain.handle(IPC.AccountsUpdate, async (_e, id: string, patch?: { remark?: string }) => {
+    accounts.setRemark(assertAccountId(id), typeof patch?.remark === 'string' ? patch.remark : '')
+    return publishAccounts()
+  })
 
-  ipcMain.handle(IPC.AuthRefresh, async () => {
-    const account = await ipatoolApi.accountInfoOrNull().catch(() => null)
-    setAccount(account)
+  ipcMain.handle(IPC.AccountsRemove, async (_e, id: string) => {
+    const accountId = assertAccountId(id)
+    // Removing an account that still owns queued or running downloads would
+    // leave rows that can never start; the queue is the one place that knows.
+    const busy = downloadQueue
+      .snapshot()
+      .items.some(
+        (item) =>
+          item.accountId === accountId && item.state !== 'done' && item.state !== 'canceled' && item.state !== 'error'
+      )
+    if (busy) {
+      throw new AccountError(
+        'This account still has downloads in the queue. Remove or clear them first.',
+        'profile-required'
+      )
+    }
+    const removed = await accounts.remove(accountId)
+    const snapshot = await publishAccounts()
+    return { snapshot, removedDir: removed.removedDir }
+  })
+
+  ipcMain.handle(IPC.AccountsVerify, async (_e, id: string) => {
+    const accountId = assertAccountId(id)
+    const check: SessionCheck = await verifySession(accountId)
+    return { snapshot: await publishAccounts(), check }
+  })
+
+  ipcMain.handle(IPC.AccountsRefresh, () => refreshAll(false).then(() => publishAccounts()))
+
+  /* ---------------------------------------------------------------- *
+   * auth
+   * ---------------------------------------------------------------- */
+
+  ipcMain.handle(
+    IPC.AuthLogin,
+    async (_e, email: string, password: string, authCode?: string, accountId?: string) => {
+      const target = accountId === undefined ? accounts.activeId : assertAccountId(accountId)
+      const result = await ipatoolApi.login(String(email ?? ''), String(password ?? ''), authCode, target)
+      if (result.status === 'ok' && result.account) {
+        // Records the learned identity, probes which credential store ipatool
+        // chose, and saves the record when the platform only has one shared slot.
+        await afterLogin(target, result.account).catch(() => undefined)
+        await publishAccounts()
+      }
+      return result
+    }
+  )
+
+  ipcMain.handle(IPC.AuthAccount, () => currentAccount())
+
+  ipcMain.handle(IPC.AuthRefresh, async (_e, accountId?: string) => {
+    const target = accountId === undefined ? accounts.activeId : assertAccountId(accountId)
+    const account = await ipatoolApi.accountInfoOrNull(target).catch(() => null)
+    if (account) await afterLogin(target, account).catch(() => undefined)
+    await publishAccounts()
     return account
   })
 
-  ipcMain.handle(IPC.AuthRevoke, async () => {
-    const result = await wrap(() => ipatoolApi.revoke())
-    if (result.ok) setAccount(null)
+  ipcMain.handle(IPC.AuthRevoke, async (_e, accountId?: string) => {
+    const target = accountId === undefined ? accounts.activeId : assertAccountId(accountId)
+    const result = await wrap(() => ipatoolApi.revoke(target))
+    if (result.ok) {
+      const profile = accounts.get(target)
+      if (profile) {
+        // The saved copy is the same secret ipatool just removed, so keeping it
+        // would leave a usable Apple ID password behind after an explicit sign-out.
+        await accounts.clearSnapshot(profile)
+        accounts.markIdentity(target, { email: '', dsid: '', name: profile.name })
+      }
+      await publishAccounts()
+    }
     return result
   })
 
@@ -464,9 +566,6 @@ export function applySettings(settings: Settings): void {
   taskRegistry.setLineCap(settings.maxLogLines)
   broadcast('settings:changed', settings)
 }
-
-/** Profiles annotated with active flag, resolved directory and password state. */
-
 
 /** Emits task/queue events to the renderer and raises OS notifications. */
 export function registerEventForwarding(): void {

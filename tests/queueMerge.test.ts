@@ -14,6 +14,7 @@ function makeItem(overrides: Partial<QueueItem> = {}): QueueItem {
     purchase: true,
     outputDir: '/tmp/ipas',
     state: 'queued',
+    accountId: 'a1bcdefg',
     progress: { received: 0, total: null, percent: null, speed: 0, etaSec: null },
     outputPath: null,
     fileSize: null,

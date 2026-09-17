@@ -7,7 +7,15 @@
  */
 
 import { create } from 'zustand'
-import type { AccountInfo, AppInfoPayload, EngineStatus, Settings, ThemeMode } from '@shared/types'
+import type {
+  AccountInfo,
+  AccountsSnapshot,
+  AccountView,
+  AppInfoPayload,
+  EngineStatus,
+  Settings,
+  ThemeMode
+} from '@shared/types'
 import { createTranslator, detectLocale, type Locale, type Translator } from '@renderer/i18n'
 import { useUiStore } from './ui'
 
@@ -21,10 +29,23 @@ const IDLE_ENGINE: EngineStatus = {
   download: null
 }
 
+/** Placeholder until the main process reports the real capability. */
+const EMPTY_ACCOUNTS: AccountsSnapshot = {
+  accounts: [],
+  activeId: '',
+  credentialSlot: 'file',
+  slotBridge: 'not-needed',
+  slotDetail: '',
+  legacy: null
+}
+
 export interface AppState {
   appInfo: AppInfoPayload | null
   settings: Settings
   engine: EngineStatus
+  /** Every registered account, plus the platform's credential-slot capability. */
+  accounts: AccountsSnapshot
+  /** Identity of the *active* account, or null when it has no usable session. */
   account: AccountInfo | null
   accountChecked: boolean
   systemTheme: 'light' | 'dark'
@@ -38,9 +59,36 @@ export interface AppState {
   detectEngine: (force?: boolean) => Promise<EngineStatus>
   installEngine: (version?: string) => Promise<EngineStatus>
   uninstallEngine: () => Promise<EngineStatus>
-  refreshAccount: () => Promise<AccountInfo | null>
-  revokeAccount: () => Promise<boolean>
+  refreshAccount: (accountId?: string) => Promise<AccountInfo | null>
+  revokeAccount: (accountId?: string) => Promise<boolean>
   setAccount: (account: AccountInfo | null) => void
+
+  getAccounts: () => Promise<AccountsSnapshot>
+  addAccount: (remark?: string) => Promise<AccountView | null>
+  activateAccount: (id: string) => Promise<AccountSwitchResult>
+  updateAccount: (id: string, remark: string) => Promise<void>
+  removeAccount: (id: string) => Promise<boolean>
+  verifyAccount: (id: string) => Promise<AccountSwitchResult>
+}
+
+/** What a switch/verify attempt reported, flattened for the UI. */
+export interface AccountSwitchResult {
+  ok: boolean
+  status: string
+  message: string
+}
+
+/**
+ * Projects the account snapshot onto the active identity.
+ *
+ * Derived rather than stored separately: `account` is what every screen gates on
+ * ("are we signed in?"), and letting it drift from the snapshot is how a UI ends
+ * up believing it is signed in as A while the main process runs as B.
+ */
+function activeIdentity(snapshot: AccountsSnapshot): AccountInfo | null {
+  const active = snapshot.accounts.find((entry) => entry.id === snapshot.activeId)
+  if (!active || !active.signedIn) return null
+  return { name: active.name, email: active.email }
 }
 
 function resolveLocale(mode: Settings['locale'], systemLocale: string): Locale {
@@ -90,7 +138,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
     purchasesPageSize: 50,
     passphraseMode: 'auto',
     keychainPassphrase: '',
-    stateDir: '',
+    isolateSessionHome: true,
+    accounts: [],
+    activeAccountId: '',
+    accountCounter: 1,
     verbose: false,
     theme: 'system',
     locale: 'system',
@@ -103,6 +154,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     lastEmail: ''
   },
   engine: IDLE_ENGINE,
+  accounts: EMPTY_ACCOUNTS,
   account: null,
   accountChecked: false,
   systemTheme: 'dark',
@@ -115,11 +167,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
     initialised = true
 
     const api = window.api
-    const [appInfo, settings, engine, account] = await Promise.all([
+    const [appInfo, settings, engine, accounts] = await Promise.all([
       api.getAppInfo(),
       api.getSettings(),
       api.getEngineStatus(),
-      api.getAccount()
+      api.getAccounts()
     ])
 
     const systemTheme: 'light' | 'dark' =
@@ -134,8 +186,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       appInfo,
       settings,
       engine,
-      account,
-      accountChecked: account !== null,
+      accounts,
+      account: activeIdentity(accounts),
+      accountChecked: true,
       systemTheme,
       locale,
       t: createTranslator(locale),
@@ -148,7 +201,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
     disposers.push(api.on('engine:status', (next) => set({ engine: next })))
     disposers.push(api.on('engine:progress', (next) => set({ engine: next })))
 
-    disposers.push(api.on('account:changed', (next) => set({ account: next, accountChecked: true })))
+    // The account list is the single source of truth for "who are we signed in
+    // as": the active pointer, every session's state and the platform's
+    // credential-slot capability all arrive together.
+    disposers.push(
+      api.on('accounts:changed', (next) => set({ accounts: next, account: activeIdentity(next), accountChecked: true }))
+    )
 
     disposers.push(
       api.on('system:theme', (next) => {
@@ -214,16 +272,19 @@ export const useAppStore = create<AppState>()((set, get) => ({
     return engine
   },
 
-  async refreshAccount() {
-    const account = await window.api.refreshAccount()
-    set({ account, accountChecked: true })
+  async refreshAccount(accountId) {
+    const account = await window.api.refreshAccount(accountId)
+    set((state) => ({
+      account: accountId === undefined ? account : state.account,
+      accountChecked: true
+    }))
     return account
   },
 
-  async revokeAccount() {
-    const result = await window.api.revoke()
+  async revokeAccount(accountId) {
+    const result = await window.api.revoke(accountId)
     if (result.ok) {
-      set({ account: null })
+      set({ account: accountId === undefined ? null : get().account })
       useUiStore.getState().toast({ kind: 'success', message: get().t('toast.signedOut') })
       return true
     }
@@ -233,6 +294,74 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   setAccount(account) {
     set({ account, accountChecked: true })
+  },
+
+  /* ------------------------------------------------------------------ *
+   * accounts
+   * ------------------------------------------------------------------ */
+
+  async getAccounts() {
+    const accounts = await window.api.getAccounts()
+    set({ accounts, account: activeIdentity(accounts) })
+    return accounts
+  },
+
+  /** Creates an empty account and makes it active; returns it for the sign-in flow. */
+  async addAccount(remark) {
+    try {
+      const accounts = await window.api.addAccount(remark)
+      set({ accounts, account: activeIdentity(accounts) })
+      return accounts.accounts.find((entry) => entry.id === accounts.activeId) ?? null
+    } catch (error) {
+      useUiStore.getState().toast({ kind: 'error', message: String(error) })
+      return null
+    }
+  },
+
+  async activateAccount(id) {
+    try {
+      const { snapshot, check } = await window.api.activateAccount(id)
+      set({ accounts: snapshot, account: activeIdentity(snapshot), accountChecked: true })
+      return { ok: check.status === 'ok', status: check.status, message: check.message }
+    } catch (error) {
+      // A failed switch may still have moved the active pointer (it is committed
+      // before the probe runs), so re-read rather than assuming nothing changed.
+      await get().getAccounts().catch(() => undefined)
+      return { ok: false, status: 'error', message: error instanceof Error ? error.message : String(error) }
+    }
+  },
+
+  async updateAccount(id, remark) {
+    try {
+      const accounts = await window.api.updateAccount(id, { remark })
+      set({ accounts, account: activeIdentity(accounts) })
+    } catch (error) {
+      useUiStore.getState().toast({ kind: 'error', message: String(error) })
+    }
+  },
+
+  async removeAccount(id) {
+    try {
+      const { snapshot } = await window.api.removeAccount(id)
+      set({ accounts: snapshot, account: activeIdentity(snapshot), accountChecked: true })
+      return true
+    } catch (error) {
+      useUiStore.getState().toast({
+        kind: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      })
+      return false
+    }
+  },
+
+  async verifyAccount(id) {
+    try {
+      const { snapshot, check } = await window.api.verifyAccount(id)
+      set({ accounts: snapshot, account: activeIdentity(snapshot), accountChecked: true })
+      return { ok: check.status === 'ok', status: check.status, message: check.message }
+    } catch (error) {
+      return { ok: false, status: 'error', message: error instanceof Error ? error.message : String(error) }
+    }
   }
 }))
 

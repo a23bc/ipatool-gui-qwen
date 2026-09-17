@@ -28,6 +28,7 @@ function codeForStatus(status: LoginStatus): string | null {
 export function AuthModal(): ReactNode {
   const t = useAppStore((state) => state.t)
   const account = useAppStore((state) => state.account)
+  const accounts = useAppStore((state) => state.accounts)
   const settings = useAppStore((state) => state.settings)
   const updateSettings = useAppStore((state) => state.updateSettings)
   const refreshAccount = useAppStore((state) => state.refreshAccount)
@@ -35,8 +36,16 @@ export function AuthModal(): ReactNode {
 
   const open = useUiStore((state) => state.authOpen)
   const setOpen = useUiStore((state) => state.setAuthOpen)
+  const setAccountsOpen = useUiStore((state) => state.setAccountsOpen)
   const toast = useUiStore((state) => state.toast)
   const setView = useUiStore((state) => state.setView)
+
+  // The sign-in is bound to whichever account is active: ipatool selects its
+  // session purely by environment, so an unbound login would land in whatever
+  // directory happened to be current.
+  const targetId = accounts.activeId
+  const target = accounts.accounts.find((view) => view.id === targetId)
+  const isNewAccount = Boolean(target) && !target?.signedIn
 
   const [email, setEmail] = useState(settings.lastEmail)
   const [password, setPassword] = useState('')
@@ -74,7 +83,12 @@ export function AuthModal(): ReactNode {
 
     let result: LoginResult
     try {
-      result = await window.api.login(email.trim(), password, step === 'code' ? code.trim() : undefined)
+      result = await window.api.login(
+        email.trim(),
+        password,
+        step === 'code' ? code.trim() : undefined,
+        targetId
+      )
     } catch (error) {
       // The bridge itself failed (main crashed, invoke rejected): roll the UI
       // back instead of leaving the dialog spinning forever, and scrub the
@@ -121,7 +135,7 @@ export function AuthModal(): ReactNode {
   const recheck = async (): Promise<void> => {
     setChecking(true)
     try {
-      const info = await refreshAccount()
+      const info = await refreshAccount(targetId)
       toast(
         info
           ? { kind: 'success', message: t('auth.success', { email: info.email }) }
@@ -138,7 +152,15 @@ export function AuthModal(): ReactNode {
     <Modal
       open={open}
       title={step === 'code' ? t('auth.2fa.title') : account ? t('auth.account.title') : t('auth.title')}
-      subtitle={step === 'code' ? t('auth.2fa.body') : account ? undefined : t('auth.subtitle')}
+      subtitle={
+        step === 'code'
+          ? t('auth.2fa.body')
+          : account
+            ? undefined
+            : isNewAccount
+              ? t('auth.subtitleNew', { name: target?.name ?? '' })
+              : t('auth.subtitle')
+      }
       onClose={() => setOpen(false)}
       width={440}
       footer={
@@ -163,7 +185,11 @@ export function AuthModal(): ReactNode {
               {checking ? <Spinner size={13} /> : <Icon name="refresh" size={13} />}
               {t('auth.account.refresh')}
             </button>
-            <button type="button" className="btn btn-danger" onClick={() => void revokeAccount()}>
+            <button type="button" className="btn" onClick={() => setAccountsOpen(true)}>
+              <Icon name="user" size={13} />
+              {t('accounts.manage')}
+            </button>
+            <button type="button" className="btn btn-danger" onClick={() => void revokeAccount(targetId)}>
               {t('auth.signOut')}
             </button>
           </>

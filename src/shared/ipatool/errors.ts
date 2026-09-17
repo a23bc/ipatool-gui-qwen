@@ -114,7 +114,17 @@ const RULES: Rule[] = [
       /SignInRequired/i,
       /please (log ?in|sign ?in)/i,
       /no credentials/i,
-      /account not found/i
+      /account not found/i,
+      // `auth info` reads the `account` item from the keyring
+      // (pkg/appstore/appstore_account_info.go -> pkg/keychain/keychain_get.go)
+      // and wraps whatever the backend returned. Both backends report a missing
+      // item as "could not be found", and the file backend adds an ENOENT when
+      // the whole record file is absent - all of which mean "not signed in",
+      // not "an unexpected failure".
+      /could not be found in the keyring/i,
+      /failed to get account/i,
+      /failed to get item/i,
+      /The specified item could not be found/i
     ],
     actionable: true
   },

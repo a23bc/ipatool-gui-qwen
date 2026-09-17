@@ -184,6 +184,11 @@ export interface QueueItem {
   purchase: boolean
   outputDir: string
   state: QueueState
+  /**
+   * Account this download runs as; '' for items persisted before multi-account
+   * existed, which then fall back to whoever is active when they resume.
+   */
+  accountId: string
   progress: QueueProgress
   outputPath: string | null
   fileSize: number | null
@@ -211,8 +216,91 @@ export interface DownloadRequest {
   externalVersionID?: string
   purchase?: boolean
   outputDir?: string
+  /** Account to download as; defaults to the active one. */
+  accountId?: string
   /** App ID used to reuse an already-cached icon in the queue row. */
   artworkKey?: number
+}
+
+/* ------------------------------------------------------------------ *
+ * Accounts (several App Store sessions side by side)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Where ipatool keeps an account's credential record.
+ *
+ * `'file'` means the record lives inside the account's own state directory, so
+ * accounts are independent by construction. `'os'` means the platform hands out
+ * one machine-wide slot (macOS Keychain / Linux Secret Service) which the GUI has
+ * to point at the right account before each use - see `shared/accounts.ts`.
+ */
+export type CredentialStore = 'file' | 'os' | 'unknown'
+
+/**
+ * One App Store account.
+ *
+ * Each account owns an isolated ipatool session directory (`XDG_STATE_HOME`) plus
+ * a sandboxed home directory, which is the mechanism upstream itself provides
+ * (`cmd/state_directory.go`). The Apple ID password is *never* held here: it is
+ * whatever ipatool wrote into the keyring, and on platforms with a shared slot a
+ * verbatim (encrypted) copy of that record is kept next to the account so a
+ * switch can restore it without asking for the password again.
+ */
+export interface AccountProfile {
+  id: string
+  /** Auto-managed label: the learned account name, else its e-mail. */
+  name: string
+  /** Free-form note the user can edit; never used as an identity. */
+  remark: string
+  /** Apple ID e-mail, learned from the session. */
+  email: string
+  /** DirectoryServicesID - the strongest identity token Apple gives us. */
+  dsid: string
+  credentialStore: CredentialStore
+  /**
+   * This account's own `--keychain-passphrase`, stored encrypted with
+   * `safeStorage`. Each account gets its own so that one leaked passphrase
+   * cannot unlock every session on the machine; it is never sent to the
+   * renderer and never leaves the main process in plaintext.
+   */
+  passphrase: string
+  createdAt: number
+  lastUsedAt: number
+}
+
+/** Rendered projection of an account, annotated with live session state. */
+export interface AccountView {
+  id: string
+  name: string
+  remark: string
+  email: string
+  /** True when the account's own session answered an identity probe. */
+  signedIn: boolean
+  active: boolean
+  credentialStore: CredentialStore
+  /** Absolute session directory ipatool is pointed at for this account. */
+  stateDir: string
+  createdAt: number
+  lastUsedAt: number
+  /**
+   * Set when the session answered with a *different* account than the one
+   * recorded. Surfaced instead of silently acting as the wrong Apple ID.
+   */
+  conflict: 'foreign-session' | 'unreadable-slot' | null
+}
+
+/** Snapshot of the account list plus the platform's credential-slot capability. */
+export interface AccountsSnapshot {
+  accounts: AccountView[]
+  activeId: string
+  /** 'os' when every account competes for one machine-wide credential slot. */
+  credentialSlot: 'file' | 'os'
+  /** Whether the GUI is able to move a saved record back into that slot. */
+  slotBridge: 'available' | 'unavailable' | 'not-needed'
+  /** Environment/os-specific explanation shown in the accounts panel. */
+  slotDetail: string
+  /** Result of the one-time reconciliation of `~/.ipatool`, for the UI notice. */
+  legacy: { adopted: boolean; quarantined: string | null } | null
 }
 
 /* ------------------------------------------------------------------ *
@@ -223,12 +311,6 @@ export type ThemeMode = 'system' | 'light' | 'dark'
 export type LocaleMode = 'system' | 'zh-CN' | 'en-US'
 export type PassphraseMode = 'auto' | 'manual' | 'none'
 
-/**
- * One App Store account.
- *
- * Backed by an isolated ipatool state directory (see main/profiles.ts), which is
- * how several sessions coexist without ever logging each other out.
- */
 export interface Settings {
   /** Manual override for the ipatool binary location. */
   ipatoolPath: string
@@ -245,10 +327,25 @@ export interface Settings {
   searchLimit: number
   purchasesPageSize: number
   passphraseMode: PassphraseMode
-  /** Only meaningful when passphraseMode === 'manual'; encrypted at rest. */
+  /**
+   * Only meaningful when passphraseMode === 'manual'; encrypted at rest.
+   * When '' each account gets its own generated passphrase instead.
+   */
   keychainPassphrase: string
-  /** Optional XDG_STATE_HOME override, isolating the GUI session from the CLI. */
-  stateDir: string
+  /**
+   * Runs ipatool with a per-account home directory.
+   *
+   * Upstream prefers `$HOME/.ipatool` whenever it exists, which would make every
+   * account share one session; the sandbox is what makes the per-account
+   * `XDG_STATE_HOME` authoritative. Turn it off only if a future ipatool build
+   * starts reading home for something else and the sandbox gets in the way.
+   */
+  isolateSessionHome: boolean
+  /** Registered accounts; always contains at least one entry. */
+  accounts: AccountProfile[]
+  activeAccountId: string
+  /** Monotonic counter behind the "Account N" labels. */
+  accountCounter: number
   verbose: boolean
   theme: ThemeMode
   locale: LocaleMode

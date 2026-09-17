@@ -164,16 +164,26 @@ export function startProcess(binary: string, options: RunOptions): RunningProces
     ...(options.env ?? {})
   }
 
-  // ipatool stores credentials in the first available keyring backend:
-  // macOS Keychain, then Linux SecretService, then a per-directory file.
-  // The first two are machine-wide single slots, which makes multi-account
-  // impossible. On Linux we can opt into real isolation by hiding D-Bus from the
-  // child, which makes SecretService unavailable and selects the file backend
-  // (already scoped to the profile's state directory). macOS has no such switch;
-  // there, switching re-authenticates via stored passwords instead.
+  // ipatool opens its keyring with the fixed backend order
+  // [keychain, secret-service, file] (cmd/common.go) and keeps the first backend
+  // that opens. Only `file` is scoped to the state directory
+  // (keyring.Config.FileDir), so on Linux the Secret Service would hand every
+  // account the same machine-wide record under the constant service name
+  // "ipatool-auth.service".
+  //
+  // Pointing the session bus at an unreachable address is what forces the file
+  // backend: `libsecret` connects through godbus, which uses
+  // DBUS_SESSION_BUS_ADDRESS verbatim whenever it is set to anything other than
+  // "autolaunch:", so the dial fails, the opener reports an error and ipatool
+  // falls through to the per-directory file. Deleting the variable is NOT enough -
+  // godbus then discovers $XDG_RUNTIME_DIR/bus, and /run/user/<uid>/bus after
+  // that, and reaches the real daemon anyway.
+  //
+  // macOS has no equivalent switch: the Keychain backend is linked in, not
+  // discovered, which is why the account registry keeps a saved record per
+  // account there and moves it into the shared slot before each use.
   if (process.platform === 'linux') {
-    delete env.DBUS_SESSION_BUS_ADDRESS
-    delete env.DBUS_SYSTEM_BUS_ADDRESS
+    env.DBUS_SESSION_BUS_ADDRESS = 'unix:path=/nonexistent/ipatool-gui-isolated-bus'
   }
 
   const stdoutBuffer = new LineBuffer()

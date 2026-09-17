@@ -43,14 +43,18 @@ beforeEach(() => {
 })
 
 describe('defaultSettings', () => {
-  it('has sane ranges and an empty state dir by default', () => {
+  it('has sane ranges and starts with no accounts', () => {
     const settings = normalizeSettings(null)
     expect(settings.concurrency).toBe(2)
     expect(settings.searchLimit).toBe(25)
     expect(settings.passphraseMode).toBe('auto')
-    // normalizeSettings() only synthesises a p-default profile when migrating
-    // materialises the default account on first use.
-    expect(settings.stateDir).toBe('')
+    // The registry (main/accounts.ts) materialises the first account on init, so
+    // normalization itself never invents one.
+    expect(settings.accounts).toEqual([])
+    expect(settings.activeAccountId).toBe('')
+    // The home sandbox is what makes the per-account state directory
+    // authoritative, so it has to be on unless the user turns it off.
+    expect(settings.isolateSessionHome).toBe(true)
     expect(defaultSettings().downloadDir).toContain('ipatool')
   })
 })
@@ -60,7 +64,7 @@ describe('normalizeSettings', () => {
     for (const bad of [null, undefined, 42, 'settings']) {
       const out = normalizeSettings(bad)
       expect(out.concurrency).toBe(2)
-      expect(out.stateDir).toBe('')
+      expect(out.accounts).toEqual([])
     }
     // An array is an object but carries no settings fields; same outcome.
     expect(normalizeSettings([]).concurrency).toBe(2)
@@ -137,66 +141,152 @@ describe('normalizeSettings', () => {
   })
 })
 
-describe('SettingsStore passphrase handling (M1)', () => {
-  it('encrypts the generated passphrase at rest and never writes plaintext', async () => {
+/** Builds a well-formed persisted account entry. */
+function persistedAccount(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'a1bcdefg',
+    name: 'Account 1',
+    remark: '',
+    email: 'a@example.com',
+    dsid: '12345',
+    credentialStore: 'file',
+    passphrase: 'enc:v1:xyz',
+    createdAt: 1,
+    lastUsedAt: 2,
+    ...over
+  }
+}
+
+/** A single account in the shape the registry stores internally. */
+function liveAccount(passphrase: string): Parameters<SettingsStore['replaceAccounts']>[0] {
+  return [
+    {
+      id: 'a1bcdefg',
+      name: 'Account 1',
+      remark: '',
+      email: '',
+      dsid: '',
+      credentialStore: 'file',
+      passphrase,
+      createdAt: 1,
+      lastUsedAt: 1
+    }
+  ]
+}
+
+describe('normalizeSettings: accounts', () => {
+  it('keeps well-formed accounts and drops entries whose id is not ours', () => {
+    const out = normalizeSettings({
+      accounts: [
+        persistedAccount(),
+        // Ids become directory names, so a persisted path traversal must not
+        // survive the round trip.
+        persistedAccount({ id: '../../etc/passwd' }),
+        persistedAccount({ id: 'a2hijklm' }),
+        persistedAccount({ id: 'a2hijklm' }) // duplicate
+      ]
+    })
+    expect(out.accounts.map((entry) => entry.id)).toEqual(['a1bcdefg', 'a2hijklm'])
+  })
+
+  it('coerces an unknown credential store back to "unknown"', () => {
+    const out = normalizeSettings({ accounts: [persistedAccount({ credentialStore: 'hacked' })] })
+    expect(out.accounts[0]?.credentialStore).toBe('unknown')
+  })
+
+  it('re-points the active id when it does not name a real account', () => {
+    const out = normalizeSettings({ accounts: [persistedAccount()], activeAccountId: 'agonegone' })
+    expect(out.activeAccountId).toBe('a1bcdefg')
+
+    const none = normalizeSettings({ accounts: [], activeAccountId: 'a1bcdefg' })
+    expect(none.activeAccountId).toBe('')
+  })
+
+  it('never lets an update() patch wipe an account passphrase', () => {
     const store = new SettingsStore()
     store.init()
-    const passphrase = await store.effectivePassphrase()
-    expect(passphrase.length).toBeGreaterThan(20)
+    store.replaceAccounts(liveAccount('secret-value'), 'a1bcdefg')
+    expect(store.getInternal().accounts[0]?.passphrase).toBe('secret-value')
+
+    // The renderer only ever sees a blanked copy, so echoing the snapshot back
+    // through update() must not be read as "the user cleared the secret".
+    store.update({ accounts: store.get().accounts, theme: 'dark' })
+    expect(store.getInternal().accounts[0]?.passphrase).toBe('secret-value')
+    expect(store.getInternal().theme).toBe('dark')
+  })
+
+  it('get() strips the per-account passphrase from the renderer snapshot', () => {
+    const store = new SettingsStore()
+    store.init()
+    store.replaceAccounts(liveAccount('secret-value'), 'a1bcdefg')
+    expect(store.get().accounts[0]?.passphrase).toBe('')
+    expect(store.getInternal().accounts[0]?.passphrase).toBe('secret-value')
+  })
+
+  it('encrypts every account passphrase on disk', async () => {
+    const store = new SettingsStore()
+    store.init()
+    store.replaceAccounts(liveAccount('super-secret'), 'a1bcdefg')
+    await store.persistNow()
 
     const raw = await readFile(store.filePath, 'utf8')
-    expect(raw).not.toContain(passphrase)
-    expect(raw).not.toContain('plain:')
+    expect(raw).not.toContain('super-secret')
     expect(raw).toContain('enc:v1:')
 
-    // A fresh store reads the encrypted value back.
     const reloaded = new SettingsStore()
     reloaded.init()
     await reloaded.load()
-    expect(reloaded.getInternal().keychainPassphrase).toBe(passphrase)
-    // ...while the renderer-facing snapshot stays masked.
-    expect(reloaded.get().keychainPassphrase).toBe('********')
+    expect(reloaded.getInternal().accounts[0]?.passphrase).toBe('super-secret')
   })
+})
 
-  it('returns the same passphrase on subsequent calls', async () => {
+
+describe('SettingsStore passphrase handling', () => {
+  it('only hands out the global passphrase under the manual policy', async () => {
     const store = new SettingsStore()
     store.init()
-    const first = await store.effectivePassphrase()
-    const second = await store.effectivePassphrase()
-    expect(second).toBe(first)
+
+    // 'auto' generates per account, so the global value stays empty - one leaked
+    // passphrase must not unlock every session on the machine.
+    expect(await store.effectivePassphrase()).toBe('')
+
+    store.update({ passphraseMode: 'manual', keychainPassphrase: 'sekrit-value' })
+    expect(await store.effectivePassphrase()).toBe('sekrit-value')
+
+    store.update({ passphraseMode: 'none' })
+    expect(await store.effectivePassphrase()).toBe('')
   })
 
-  it('refuses to persist in plaintext when safeStorage is unavailable and degrades to mode=none', async () => {
+  it('generates a distinct, encryptable passphrase per call', async () => {
+    const store = new SettingsStore()
+    store.init()
+    const first = await store.generateAccountPassphrase()
+    const second = await store.generateAccountPassphrase()
+    expect(first.length).toBeGreaterThan(20)
+    expect(second).not.toBe(first)
+  })
+
+  it('degrades to passphraseMode=none when safeStorage is unavailable', async () => {
     mocks.encryptionAvailable = false
     const store = new SettingsStore()
     store.init()
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const passphrase = await store.effectivePassphrase()
+    const passphrase = await store.generateAccountPassphrase()
     warn.mockRestore()
 
+    // Not a silent downgrade: 'none' means ipatool uses the OS keyring directly.
     expect(passphrase).toBe('')
     expect(store.getInternal().passphraseMode).toBe('none')
-    expect(store.getInternal().keychainPassphrase).toBe('')
-
-    const raw = await readFile(store.filePath, 'utf8')
-    expect(raw).not.toContain('plain:')
-  })
-
-  it('passphraseMode=none never generates or stores anything', async () => {
-    const store = new SettingsStore()
-    store.init()
-    store.update({ passphraseMode: 'none' })
-    expect(await store.effectivePassphrase()).toBe('')
     expect(store.getInternal().keychainPassphrase).toBe('')
   })
 
   it('update() preserves the secret when the UI echoes back the mask', async () => {
     const store = new SettingsStore()
     store.init()
-    const passphrase = await store.effectivePassphrase()
+    store.update({ passphraseMode: 'manual', keychainPassphrase: 'sekrit-value' })
     store.update({ keychainPassphrase: '********', theme: 'dark' })
-    expect(store.getInternal().keychainPassphrase).toBe(passphrase)
+    expect(store.getInternal().keychainPassphrase).toBe('sekrit-value')
     expect(store.getInternal().theme).toBe('dark')
   })
 

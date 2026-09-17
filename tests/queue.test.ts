@@ -155,11 +155,41 @@ describe('DownloadQueue.load / hydrate', () => {
     // The existing item is pre-seeded as `paused` (not `queued`) so the pump
     // cannot start a real download chain in the test environment.
     await loadFixture([
-      { id: 'existing', appId: 42, bundleID: 'com.example.app', platform: 'iphone', state: 'paused' }
+      {
+        id: 'existing',
+        accountId: 'a1bcdefg',
+        appId: 42,
+        bundleID: 'com.example.app',
+        platform: 'iphone',
+        state: 'paused'
+      }
     ])
-    const ids = queue.enqueue([{ appId: 42, bundleID: 'com.example.app', platform: 'iphone' }])
+    const ids = queue.enqueue([
+      { accountId: 'a1bcdefg', appId: 42, bundleID: 'com.example.app', platform: 'iphone' }
+    ])
     expect(ids).toEqual(['existing'])
     expect(queue.snapshot().items).toHaveLength(1)
+  })
+
+  it('keeps the same app as separate rows for different accounts', async () => {
+    // The same bundle id is a different download under a different Apple ID:
+    // another licence, possibly another storefront. Collapsing them would make
+    // one account's row silently download as the other.
+    await loadFixture([
+      {
+        id: 'existing',
+        accountId: 'a1bcdefg',
+        appId: 42,
+        bundleID: 'com.example.app',
+        platform: 'iphone',
+        state: 'paused'
+      }
+    ])
+    const ids = queue.enqueue([
+      { accountId: 'a2hijklm', appId: 42, bundleID: 'com.example.app', platform: 'iphone' }
+    ])
+    expect(ids).not.toEqual(['existing'])
+    expect(queue.snapshot().items).toHaveLength(2)
   })
 
   it('control() ignores unknown items and clearFinished() only removes terminal items', async () => {
