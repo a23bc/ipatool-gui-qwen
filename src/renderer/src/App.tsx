@@ -2,6 +2,8 @@ import { useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { useAppStore } from '@renderer/store/app'
 import { useQueueStore } from '@renderer/store/queue'
+import { initPurchasesSession } from '@renderer/store/purchases'
+import { initSearchSession } from '@renderer/store/search'
 import { useTasksStore } from '@renderer/store/tasks'
 import { useUiStore, VIEWS, type View } from '@renderer/store/ui'
 import { CommandPalette } from '@renderer/components/CommandPalette'
@@ -66,6 +68,17 @@ export function App(): ReactNode {
       await Promise.all([initQueue(), initTasks()])
     })()
   }, [initApp, initQueue, initTasks])
+
+  // Bind the stores that hold per-account data to the active account. Search
+  // results and the owned-apps list both belong to exactly one Apple ID, so a
+  // switch has to drop them; subscribing here (rather than in each view) means the
+  // reset also happens while another view is on screen.
+  useEffect(() => {
+    const disposers = [initSearchSession(), initPurchasesSession()]
+    return () => {
+      for (const dispose of disposers) dispose()
+    }
+  }, [])
 
   // Global shortcuts: Ctrl/Cmd+1..5 switch views, Ctrl/Cmd+, opens settings.
   useEffect(() => {

@@ -4,6 +4,11 @@
  * ipatool pages this list, so the store accumulates pages and lets the user keep
  * loading. Selection is keyed on `id|bundleID` rather than the array index, so it
  * survives filtering and paging.
+ *
+ * Everything here belongs to *one* Apple ID: the list is that account's licences.
+ * Switching accounts therefore resets the store outright (see
+ * {@link initPurchasesSession}), and a page still in flight when the switch
+ * happens is discarded instead of being appended to the new account's list.
  */
 
 import { create } from 'zustand'
@@ -23,6 +28,10 @@ export interface PurchasesState {
   loading: boolean
   loaded: boolean
   error: { message: string; hint: string | null; code: string | null } | null
+  /** Account the loaded pages belong to. */
+  accountId: string
+  /** Bumped on every account change, so a stale page is never merged in. */
+  epoch: number
 
   setPlatform: (platform: Platform) => void
   setFilter: (filter: string) => void
@@ -60,6 +69,8 @@ export const usePurchasesStore = create<PurchasesState>()((set, get) => ({
   loading: false,
   loaded: false,
   error: null,
+  accountId: currentAccountId(),
+  epoch: 0,
 
   setPlatform: (platform) => {
     set({ platform })
@@ -70,6 +81,8 @@ export const usePurchasesStore = create<PurchasesState>()((set, get) => ({
 
   async load(page = 1, append = false) {
     const settings = useAppStore.getState().settings
+    const accountId = currentAccountId()
+    const epoch = get().epoch
     set({ loading: true, error: null })
 
     let result
@@ -82,9 +95,13 @@ export const usePurchasesStore = create<PurchasesState>()((set, get) => ({
     } catch (error) {
       // Same contract as search.run: an IPC rejection must roll the loading
       // state back instead of leaving the view spinning forever.
+      if (get().epoch !== epoch) return
       set({ loading: false, error: { message: String(error), hint: null, code: null } })
       return
     }
+
+    // A page fetched as the previous account is not this account's licence list.
+    if (get().epoch !== epoch || currentAccountId() !== accountId) return
 
     if (!result.ok) {
       set({
@@ -96,7 +113,9 @@ export const usePurchasesStore = create<PurchasesState>()((set, get) => ({
     }
 
     const incoming = result.data.apps
-    const existing = append ? get().apps : []
+    // `append` only merges when the pages so far belong to the same account; a
+    // switch (which resets `apps`) must never inherit them.
+    const existing = append && get().accountId === accountId ? get().apps : []
     // De-duplicate across pages: Apple can repeat an app when the catalogue
     // shifts between requests.
     const seen = new Set(existing.map(appKey))
@@ -109,7 +128,8 @@ export const usePurchasesStore = create<PurchasesState>()((set, get) => ({
       loadedPages: append ? Array.from(new Set([...get().loadedPages, page])) : [page],
       loading: false,
       loaded: true,
-      error: null
+      error: null,
+      accountId
     })
   },
 
@@ -136,20 +156,50 @@ export const usePurchasesStore = create<PurchasesState>()((set, get) => ({
   },
 
   reset() {
-    set({
+    set((state) => ({
       apps: [],
       loadedPages: [],
       page: 1,
       totalCount: 0,
-      // The previous account's storefront/platform choice must not leak into
-      // the next one: reset() runs on profile switch, and querying the new
-      // session with the old platform can legitimately return zero results.
+      // The previous account's storefront/platform choice must not leak into the
+      // next one: querying the new session with the old platform can legitimately
+      // return zero results.
       platform: useAppStore.getState().settings.defaultPlatform,
       filter: '',
       selection: [],
       loading: false,
       loaded: false,
-      error: null
-    })
+      error: null,
+      accountId: currentAccountId(),
+      epoch: state.epoch + 1
+    }))
   }
 }))
+
+/** The account every request will actually run as, straight from the live store. */
+function currentAccountId(): string {
+  return useAppStore.getState().accounts.activeId
+}
+
+/**
+ * Wipes the licence list whenever the active account changes.
+ *
+ * Owned apps are per Apple ID, so keeping them across a switch would show one
+ * account's purchases - and let the user queue downloads against them - under
+ * another. `reset()` also bumps the epoch, which is what discards a page that was
+ * still being fetched as the previous account.
+ */
+export function initPurchasesSession(): () => void {
+  const off = window.api.on('accounts:changed', (snapshot) => {
+    if (usePurchasesStore.getState().accountId === snapshot.activeId) return
+    usePurchasesStore.getState().reset()
+  })
+
+  // The first snapshot may already have arrived before this ran.
+  const active = currentAccountId()
+  if (active !== '' && usePurchasesStore.getState().accountId !== active) {
+    usePurchasesStore.setState({ accountId: active })
+  }
+
+  return off
+}

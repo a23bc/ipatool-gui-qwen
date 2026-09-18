@@ -164,6 +164,19 @@ export class AccountRegistry extends EventEmitter {
     return profile.email.trim() !== '' || profile.dsid.trim() !== ''
   }
 
+  /**
+   * True for an account that has never been used: no identity, no user note.
+   *
+   * ipatool needs at least one account to exist as soon as the app runs, so one
+   * is created up front - but it is a *slot*, not an account the user made. It is
+   * therefore hidden from the UI and reused by {@link add}, which is what stops
+   * "add account" on a fresh install from creating an "Account 2" that makes the
+   * first slot look pointless.
+   */
+  private isUnused(profile: AccountProfile): boolean {
+    return !this.hasRecordedSession(profile) && profile.remark.trim() === ''
+  }
+
   view(profile: AccountProfile): AccountView {
     return {
       id: profile.id,
@@ -185,7 +198,11 @@ export class AccountRegistry extends EventEmitter {
     const profiles = sortAccounts(this.list())
     const shared = profiles.some((profile) => this.effectiveStore(profile) === 'os')
     return {
-      accounts: profiles.map((profile) => this.view(profile)),
+      // Unused slots are not listed: the switcher must not offer a nameless
+      // "Account 1" before the user has ever signed in. `activeId` still points
+      // at one, which is exactly why the UI treats "active but not listed" as
+      // "not signed in".
+      accounts: profiles.filter((profile) => !this.isUnused(profile)).map((profile) => this.view(profile)),
       activeId: this.activeId,
       credentialSlot: shared ? 'os' : 'file',
       slotBridge: shared ? (bridge.available ? 'available' : 'unavailable') : 'not-needed',
@@ -238,9 +255,25 @@ export class AccountRegistry extends EventEmitter {
     return profile
   }
 
-  /** Adds an account and makes it active. */
+  /**
+   * Adds an account and makes it active.
+   *
+   * Reuses a never-used slot when there is one, so the first "add account" on a
+   * fresh install signs in to *that* slot instead of leaving an empty "Account 1"
+   * behind and starting at "Account 2". A note is still honoured even when no
+   * account has been signed in yet - in that case the caller asked for a distinct,
+   * named entry.
+   */
   add(remark = ''): AccountProfile {
-    const profile = this.create(remark)
+    const note = remark.trim()
+    const reusable = note === '' ? sortAccounts(this.list()).find((account) => this.isUnused(account)) : undefined
+    if (reusable) {
+      this.activate(reusable.id)
+      void this.ensureDirs(reusable)
+      return this.get(reusable.id) ?? reusable
+    }
+
+    const profile = this.create(note)
     void this.ensureDirs(profile)
     return profile
   }

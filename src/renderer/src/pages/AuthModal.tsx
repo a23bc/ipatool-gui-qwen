@@ -43,9 +43,12 @@ export function AuthModal(): ReactNode {
   // The sign-in is bound to whichever account is active: ipatool selects its
   // session purely by environment, so an unbound login would land in whatever
   // directory happened to be current.
+  //
+  // `target` is undefined for a never-used slot, which the registry keeps out of
+  // the list - and that is precisely the first-ever sign-in, where a generic
+  // subtitle fits better than naming an account the user has not created yet.
   const targetId = accounts.activeId
   const target = accounts.accounts.find((view) => view.id === targetId)
-  const isNewAccount = Boolean(target) && !target?.signedIn
 
   const [email, setEmail] = useState(settings.lastEmail)
   const [password, setPassword] = useState('')
@@ -91,10 +94,10 @@ export function AuthModal(): ReactNode {
       )
     } catch (error) {
       // The bridge itself failed (main crashed, invoke rejected): roll the UI
-      // back instead of leaving the dialog spinning forever, and scrub the
-      // password - the attempt is over either way.
+      // back instead of leaving the dialog spinning forever. The password is
+      // kept - an infrastructure failure says nothing about the credentials, and
+      // making the user retype them is the one thing that cannot be recovered.
       setFailure({ message: String(error), code: null })
-      setPassword('')
       setCode('')
       setStep('credentials')
       return
@@ -124,9 +127,10 @@ export function AuthModal(): ReactNode {
       // verified password and only reset the code field.
       setCode('')
     } else {
-      // Any other failure ends the attempt: scrub the password and return to
-      // the credentials step rather than leaving it in React state.
-      setPassword('')
+      // A failed attempt keeps both fields: re-entering a long Apple ID password
+      // after a typo'd 2FA code or a transient rate-limit is the worst part of the
+      // flow, and the value never left this process. (Revisiting whether the
+      // password should survive is tracked separately.)
       setCode('')
       setStep('credentials')
     }
@@ -157,8 +161,8 @@ export function AuthModal(): ReactNode {
           ? t('auth.2fa.body')
           : account
             ? undefined
-            : isNewAccount
-              ? t('auth.subtitleNew', { name: target?.name ?? '' })
+            : target
+              ? t('auth.subtitleNew', { name: target.name })
               : t('auth.subtitle')
       }
       onClose={() => setOpen(false)}
@@ -293,12 +297,11 @@ export function AuthModal(): ReactNode {
           )}
 
           {failure ? (
-            <ErrorNotice
-              message={failure.message}
-              hint={failure.code}
-              onRetry={failure.code === 'rate-limited' || failure.code === null ? () => void submit() : undefined}
-              onViewLog={undefined}
-            />
+            // No retry affordance: the failed attempt already left every field
+            // intact, so the button could only re-send what the user is about to
+            // edit anyway - and on a rate limit it invites a retry that cannot
+            // succeed.
+            <ErrorNotice message={failure.message} hint={failure.code} onViewLog={undefined} />
           ) : null}
 
           {failure?.code === 'passphrase-required' ? (

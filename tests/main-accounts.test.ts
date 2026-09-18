@@ -259,7 +259,12 @@ describe('AccountRegistry: leases', () => {
     const second = await reg.acquire()
     expect(second.passphrase).toBe(first.passphrase)
 
-    const other = reg.add('')
+    // A second account only exists once the first one has an identity - `add()`
+    // reuses a slot that has never been signed in to.
+    reg.markIdentity(first.account.id, { email: 'me@example.com', dsid: '', name: 'Me' })
+    const other = reg.add()
+    expect(other.id).not.toBe(first.account.id)
+
     const third = await reg.acquire(other.id)
     expect(third.passphrase).not.toBe(first.passphrase)
   })
@@ -440,6 +445,54 @@ describe('AccountRegistry: identity and removal', () => {
     // A label the user set is never overwritten by a later sign-in.
     expect(reg.get(profile.id)?.name).toBe('Jane')
     expect(reg.get(profile.id)?.remark).toBe('work')
+  })
+
+  it('hides a never-used slot and reuses it for the first sign-in', async () => {
+    const reg = registry()
+    await reg.init()
+
+    // ipatool needs an account to exist before anything can run, but the user has
+    // not created one: listing it would offer a nameless "Account 1" and make
+    // "add account" look like it should start at "Account 2".
+    expect((await reg.snapshot()).accounts).toEqual([])
+    expect(reg.activeId).toBe(reg.list()[0]?.id)
+
+    const first = reg.add()
+    expect(first.id).toBe(reg.list()[0]?.id)
+    expect(reg.list()).toHaveLength(1)
+    expect(reg.activeId).toBe(first.id)
+
+    // Still unused, so still hidden - and still reused on the next attempt.
+    expect((await reg.snapshot()).accounts).toEqual([])
+    expect(reg.add().id).toBe(first.id)
+    expect(reg.list()).toHaveLength(1)
+
+    // Once it has an identity it is a real account, and the next one is second.
+    reg.markIdentity(first.id, { email: 'me@example.com', dsid: '', name: 'Me' })
+    const views = (await reg.snapshot()).accounts
+    expect(views.map((view) => view.id)).toEqual([first.id])
+    expect(views[0]?.signedIn).toBe(true)
+
+    const second = reg.add()
+    expect(second.id).not.toBe(first.id)
+    expect(second.name).toBe('Account 2')
+    expect(reg.list()).toHaveLength(2)
+  })
+
+  it('lists an account whose session has gone, but keeps a note visible', async () => {
+    const reg = registry()
+    await reg.init()
+    const profile = reg.add()
+
+    // A note alone makes it the user's own entry, even before any sign-in.
+    reg.setRemark(profile.id, 'work')
+    expect((await reg.snapshot()).accounts.map((view) => view.id)).toEqual([profile.id])
+
+    // ...and an account that recorded an identity stays listed when it is signed
+    // out again (revoke clears the identity, the note keeps it around).
+    reg.setRemark(profile.id, '')
+    reg.markIdentity(profile.id, { email: 'me@example.com', dsid: '', name: 'Me' })
+    expect((await reg.snapshot()).accounts).toHaveLength(1)
   })
 
   it('removes only its own managed directory', async () => {

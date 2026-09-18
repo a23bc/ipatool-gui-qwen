@@ -9,5 +9,5 @@
     // belongs behind the preload bridge. (Scripts/main use tsconfig.node.json.)
     "types": ["vite/client"]
   },
-  "include": ["src/renderer/src", "src/shared"]
+  "include": ["src/renderer/src", "src/shared", "tests/dom"]
 }
