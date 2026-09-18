@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import type { ReactNode } from 'react'
-import { useAppStore, engineReady } from '@renderer/store/app'
+import { useAppStore } from '@renderer/store/app'
 import { useQueueStore } from '@renderer/store/queue'
 import { useUiStore, type View } from '@renderer/store/ui'
 import { Icon, type IconName } from './Icon'
@@ -75,17 +75,6 @@ function SectionLabel({ children }: { children: ReactNode }): ReactNode {
 
 export const Sidebar = memo(function Sidebar(): ReactNode {
   const t = useAppStore((state) => state.t)
-  const engine = useAppStore((state) => state.engine)
-  const account = useAppStore((state) => state.account)
-  const setAuthOpen = useUiStore((state) => state.setAuthOpen)
-  const setView = useUiStore((state) => state.setView)
-  const ready = engineReady(engine)
-
-  const engineColor = ready
-    ? 'var(--success)'
-    : engine.state === 'downloading' || engine.state === 'checking'
-      ? 'var(--warn)'
-      : 'var(--danger)'
 
   return (
     <aside
@@ -106,37 +95,6 @@ export const Sidebar = memo(function Sidebar(): ReactNode {
             <NavButton key={item.view} item={item} />
           ))}
         </nav>
-      </div>
-
-      <div className="mt-auto flex flex-col gap-2 border-t p-2.5" style={{ borderColor: 'var(--border)' }}>
-        {/* Engine health - the single most important status in the app. */}
-        <button
-          type="button"
-          className="no-drag flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--row-hover)]"
-          onClick={() => setView('settings')}
-          title={engine.path ?? t('engine.pill.missing')}
-        >
-          <span
-            className="h-1.5 w-1.5 shrink-0 rounded-full"
-            style={{ background: engineColor, boxShadow: `0 0 0 3px color-mix(in srgb, ${engineColor} 22%, transparent)` }}
-          />
-          <span className="min-w-0 flex-1 truncate text-[11.5px] dim">
-            {ready ? `ipatool ${engine.version ?? ''}`.trim() : t(`engine.state.${engine.state}`)}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          className="no-drag flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--row-hover)]"
-          onClick={() => setAuthOpen(true)}
-        >
-          <span style={{ color: account ? 'var(--accent)' : 'var(--text-faint)' }}>
-            <Icon name="user" size={14} />
-          </span>
-          <span className="min-w-0 flex-1 truncate text-[11.5px] dim">
-            {account ? account.email : t('auth.signedOut')}
-          </span>
-        </button>
       </div>
     </aside>
   )

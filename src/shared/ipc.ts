@@ -10,6 +10,7 @@
 
 import type {
   AccountInfo,
+  AccountsSnapshot,
   AppInfoPayload,
   DownloadRequest,
   EngineRelease,
@@ -56,6 +57,14 @@ export const IPC = Object.freeze({
   AuthAccount: 'auth:account',
   AuthRefresh: 'auth:refresh',
   AuthRevoke: 'auth:revoke',
+
+  AccountsGet: 'accounts:get',
+  AccountsAdd: 'accounts:add',
+  AccountsActivate: 'accounts:activate',
+  AccountsUpdate: 'accounts:update',
+  AccountsRemove: 'accounts:remove',
+  AccountsVerify: 'accounts:verify',
+  AccountsRefresh: 'accounts:refresh',
 
   StoreSearch: 'store:search',
   StoreVersions: 'store:versions',
@@ -138,11 +147,19 @@ export interface FileFilter {
   extensions: string[]
 }
 
+/** Outcome of an identity probe, mirrored from main/session.ts. */
+export interface SessionCheck {
+  status: 'ok' | 'signed-out' | 'foreign' | 'unavailable'
+  account: AccountInfo | null
+  expected: string
+  message: string
+}
+
 /** Main -> renderer push events. */
 export interface EventPayloadMap {
   'engine:status': EngineStatus
   'engine:progress': EngineStatus
-  'account:changed': AccountInfo | null
+  'accounts:changed': AccountsSnapshot
   'settings:changed': Settings
   'task:created': TaskRecord
   'task:log': { taskId: string; line: LogLine }
@@ -185,11 +202,30 @@ export interface RendererApi {
   uninstallEngine(): Promise<EngineStatus>
   checkAppUpdate(): Promise<UpdateCheckResult>
 
+  /* --- accounts --------------------------------------------------- */
+  /**
+   * Every registered account plus the platform's credential-slot capability.
+   * The active account's identity is part of this snapshot, so the UI never has
+   * to guess which of several sessions a command will run as.
+   */
+  getAccounts(): Promise<AccountsSnapshot>
+  /** Creates an empty account and makes it active, ready for a sign-in. */
+  addAccount(remark?: string): Promise<AccountsSnapshot>
+  /** Selects an account and verifies that its session is really usable. */
+  activateAccount(id: string): Promise<{ snapshot: AccountsSnapshot; check: SessionCheck }>
+  updateAccount(id: string, patch: { remark?: string }): Promise<AccountsSnapshot>
+  removeAccount(id: string): Promise<{ snapshot: AccountsSnapshot; removedDir: boolean }>
+  /** Re-runs the identity probe for one account (and adopts a CLI-created session). */
+  verifyAccount(id: string): Promise<{ snapshot: AccountsSnapshot; check: SessionCheck }>
+  /** Probes every account; used when the accounts panel opens. */
+  refreshAccounts(): Promise<AccountsSnapshot>
+
   /* --- auth ------------------------------------------------------- */
-  login(email: string, password: string, authCode?: string, profileId?: string): Promise<LoginResult>
+  login(email: string, password: string, authCode?: string, accountId?: string): Promise<LoginResult>
+  /** Identity of the active account, or null when it has no usable session. */
   getAccount(): Promise<AccountInfo | null>
-  refreshAccount(profileId?: string): Promise<AccountInfo | null>
-  revoke(profileId?: string): Promise<Operation<{ revoked: boolean }>>
+  refreshAccount(accountId?: string): Promise<AccountInfo | null>
+  revoke(accountId?: string): Promise<Operation<{ revoked: boolean }>>
 
   /* --- store ------------------------------------------------------ */
   search(request: SearchRequest): Promise<Operation<SearchResult>>

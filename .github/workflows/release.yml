@@ -59,12 +59,29 @@ jobs:
             flag: '--arm64'
             extra: '-c.mac.target=dir'
             label: 'macOS arm64'
+          # Linux ships two architectures as two jobs. The arch MUST come from
+          # `--x64` / `--arm64`: a target name cannot carry it (`--linux
+          # AppImage:x64` is rejected as an unknown argument - the array option
+          # stops at the next `--flag`, so the tokens never reach it).
+          #
+          # For that flag to mean anything, electron-builder.yml's linux.target
+          # lists no arch - while it did, `--x64` was silently ignored and every
+          # job built both (computeArchToTargetNamesMap() only consults the CLI
+          # for target names it invents itself, and otherwise expands the arch
+          # list from the config), which is how the arm64 package ended up
+          # inside the x64 artifact.
           - os: ubuntu-22.04
             platform: linux
             arch: x64
             flag: '--x64'
             extra: ''
             label: 'Linux x64'
+          - os: ubuntu-22.04
+            platform: linux
+            arch: arm64
+            flag: '--arm64'
+            extra: ''
+            label: 'Linux arm64'
     runs-on: ${{ matrix.os }}
     # Windows runners default to PowerShell, which breaks the Unix tooling used
     # below (ls, line continuations). bash ships on all three runner images.
@@ -204,7 +221,7 @@ jobs:
           gh release create "$TAG" \
             --title "IPATool GUI ${TAG}" \
             --draft \
-            --notes "Windows: NSIS installer + portable exe. Linux: deb + AppImage. macOS: runnable .app.tar.gz (build the dmg installer locally with npm run dist:mac).
+            --notes "Windows: NSIS installer + portable exe (x64). Linux: deb + AppImage, built separately for x64 and arm64. macOS: runnable .app.tar.gz for x64 and arm64 (build the dmg installer locally with npm run dist:mac).
 
           Builds are **unsigned**: on macOS right-click → Open the first time; on Windows accept the SmartScreen prompt.
 

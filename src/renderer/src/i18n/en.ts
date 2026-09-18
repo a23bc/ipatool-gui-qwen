@@ -52,6 +52,7 @@ export const en = {
   'common.next': 'Next',
   'common.done': 'Done',
 
+  'platform.label': 'Platform',
   'platform.auto': 'Auto (iPhone + iPad)',
   'platform.iphone': 'iPhone (iOS)',
   'platform.ipad': 'iPad (iPadOS)',
@@ -109,6 +110,8 @@ export const en = {
   'auth.title': 'Sign in to the App Store',
   'auth.subtitle':
     'Credentials go straight to ipatool, which stores them in your OS keyring. This app never saves your password.',
+  'auth.subtitleNew':
+    'Signing in to "{name}". Each account keeps its own session, so switching later does not sign the other one out.',
   'auth.email': 'Apple ID e-mail',
   'auth.password': 'Password',
   'auth.emailPlaceholder': 'you@example.com',
@@ -134,6 +137,52 @@ export const en = {
   'auth.required.title': 'Sign in required',
   'auth.required.body':
     'Searching, listing versions and downloading all require an authenticated App Store session. Sign in to continue.',
+
+  /* ---------------- accounts ---------------- */
+  'accounts.title': 'Accounts',
+  'accounts.subtitle': 'One independent App Store session per account.',
+  'accounts.count': '{n} accounts',
+  'accounts.unnamed': 'Unnamed account',
+  'accounts.empty': 'No accounts yet.',
+  'accounts.add': 'Add account',
+  'accounts.manage': 'Manage accounts',
+  'accounts.switch': 'Switch',
+  'accounts.switched': 'Switched account',
+  'accounts.switchFailed': 'Could not switch to that account',
+  'accounts.verify': 'Re-check',
+  'accounts.verified': 'Session verified',
+  'accounts.verifyFailed': 'Could not verify this session',
+  'accounts.refreshAll': 'Re-check all',
+  'accounts.remark': 'Rename…',
+  'accounts.remarkPlaceholder': 'A note to tell your accounts apart (optional)',
+  'accounts.reveal': 'Folder',
+  'accounts.remove': 'Remove',
+  'accounts.remove.title': 'Remove this account?',
+  'accounts.remove.body':
+    'The session directory, saved credentials and download history for "{name}" are deleted from this machine. The Apple ID itself is untouched.',
+  'accounts.remove.confirm': 'Remove account',
+  'accounts.remove.done': 'Account removed',
+  'accounts.remove.disabled': 'Switch away from this account before removing it.',
+  'accounts.row.noSession': 'No session - sign in',
+  'accounts.badge.active': 'Active',
+  'accounts.badge.noSession': 'No session',
+  'accounts.badge.conflict': 'Conflict',
+  'accounts.conflict.foreign-session':
+    'This account\u2019s session currently belongs to a different Apple ID. Sign in again to restore it.',
+  'accounts.conflict.unreadable-slot':
+    'The saved credentials could not be read back, so switching back to this account will ask for the password again.',
+  'accounts.store.file': 'Own credentials',
+  'accounts.store.os': 'Shared keychain',
+  'accounts.slot.perAccount':
+    'Each account keeps its own encrypted credentials, so signing in to one never affects the others.',
+  'accounts.slot.sharedManaged':
+    'macOS stores ipatool credentials in a single login-Keychain item, shared by every ipatool process. The app moves the selected account into it, and keeps an encrypted copy per account so switching needs no password.',
+  'accounts.slot.sharedUnmanaged':
+    'macOS stores ipatool credentials in a single login-Keychain item and the app cannot manage it here, so switching back to an account requires signing in again.',
+  'accounts.legacy.adopted':
+    'The existing ~/.ipatool session was adopted as the first account, because ipatool would otherwise have shared it with every account.',
+  'accounts.legacy.quarantined':
+    'An existing ~/.ipatool session was moved to {path} so it could not be shared between accounts. Nothing was deleted.',
 
   /* ---------------- search ---------------- */
   'search.placeholder': 'Search the App Store by name, developer or bundle id…',
@@ -316,15 +365,17 @@ export const en = {
 
   'settings.account.passphrase': 'Keyring passphrase',
   'settings.account.passphraseHelp':
-    'ipatool encrypts your Apple credentials in a keyring file. On Windows (and Linux without a secret service) it needs a passphrase. "Managed" generates one and stores it in your OS keychain, so you never have to think about it.',
+    'ipatool encrypts your Apple credentials in a keyring file. On Windows (and Linux without a secret service) it needs a passphrase. "Managed" generates one per account and stores it in your OS keychain, so you never have to think about it.',
   'settings.account.passphraseMode.auto': 'Managed (recommended)',
   'settings.account.passphraseMode.manual': 'Use my own passphrase',
   'settings.account.passphraseMode.none': 'Do not pass one (use the OS keyring)',
   'settings.account.passphraseValue': 'Passphrase',
   'settings.account.passphraseWarning':
     'If you already use ipatool in a terminal, use the same passphrase here or the stored credentials cannot be decrypted.',
-  'settings.account.stateDir': 'Credential directory (XDG_STATE_HOME)',
-  'settings.account.stateDirHelp': 'Leave empty to share ipatool\'s default session directory with the terminal CLI; set a path to keep this app\'s session separate.',
+  'settings.accounts.help': 'Each account gets its own session directory, so signing in to one never signs the others out.',
+  'settings.account.isolateHome': 'Isolate each account\u2019s home directory',
+  'settings.account.isolateHomeHelp':
+    'ipatool prefers ~/.ipatool whenever it exists, which would make every account share one session. Running it with a per-account home directory removes that fallback. Turn this off only if it interferes with a future ipatool build - the app then moves ~/.ipatool aside instead.',
   'settings.account.verbose': 'Verbose ipatool logs',
 
   'settings.downloads.dir': 'Download folder',

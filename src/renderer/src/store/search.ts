@@ -1,9 +1,16 @@
 /**
  * Search state.
  *
- * Results are cached per (term, platform, limit) so paging back through the UI
- * is instant and a repeated query does not hit Apple again. The cache is bounded
- * and lives only in memory - it is a convenience, not a source of truth.
+ * Results are cached per (account, term, platform, limit) so paging back through
+ * the UI is instant and a repeated query does not hit Apple again. The cache is
+ * bounded and lives only in memory - it is a convenience, not a source of truth.
+ *
+ * The **account is part of the key**, because the storefront comes from the
+ * signed-in account: the same term legitimately returns different catalogues for
+ * two Apple IDs, and a cache that ignored the account would show account A's
+ * results as if they were account B's. Switching accounts also drops what is on
+ * screen and invalidates any search still in flight, so a late response can never
+ * repopulate the list with the previous session's data.
  */
 
 import { create } from 'zustand'
@@ -39,6 +46,10 @@ export interface SearchState {
   loading: boolean
   error: SearchError | null
   history: string[]
+  /** Account the displayed results were fetched for. */
+  accountId: string
+  /** Bumped on every account change, so in-flight searches can be discarded. */
+  epoch: number
 
   setTerm: (term: string) => void
   setPlatform: (platform: Platform) => void
@@ -49,8 +60,13 @@ export interface SearchState {
   removeHistory: (term: string) => void
 }
 
-function cacheKey(term: string, platform: Platform, limit: number): string {
-  return `${term.trim().toLowerCase()}|${platform}|${limit}`
+function cacheKey(accountId: string, term: string, platform: Platform, limit: number): string {
+  return `${accountId}|${term.trim().toLowerCase()}|${platform}|${limit}`
+}
+
+/** The account every request will actually run as, straight from the live store. */
+function currentAccountId(): string {
+  return useAppStore.getState().accounts.activeId
 }
 
 let cache: CacheEntry[] = []
@@ -77,6 +93,8 @@ export const useSearchStore = create<SearchState>()((set, get) => ({
   loading: false,
   error: null,
   history: readJson<string[]>(HISTORY_KEY, []),
+  accountId: currentAccountId(),
+  epoch: 0,
 
   setTerm: (term) => set({ term }),
   setPlatform: (platform) => set({ platform }),
@@ -87,14 +105,16 @@ export const useSearchStore = create<SearchState>()((set, get) => ({
     if (query === '') return
 
     const { platform, limit } = get()
-    const key = cacheKey(query, platform, limit)
+    const accountId = currentAccountId()
+    const epoch = get().epoch
+    const key = cacheKey(accountId, query, platform, limit)
     const cached = readCache(key)
     if (cached) {
-      set({ results: cached.apps, query, error: null, loading: false })
+      set({ results: cached.apps, query, error: null, loading: false, accountId })
       return
     }
 
-    set({ loading: true, error: null, query })
+    set({ loading: true, error: null, query, accountId })
 
     let result
     try {
@@ -102,6 +122,7 @@ export const useSearchStore = create<SearchState>()((set, get) => ({
     } catch (error) {
       // IPC itself rejected (main crashed / bridge gone). Without this the
       // store would spin forever: loading stays true and nothing can retry.
+      if (get().epoch !== epoch) return
       set({
         loading: false,
         results: [],
@@ -109,6 +130,10 @@ export const useSearchStore = create<SearchState>()((set, get) => ({
       })
       return
     }
+
+    // The account (or the whole session) changed while this was in flight: the
+    // answer belongs to the previous one, so it is dropped rather than shown.
+    if (get().epoch !== epoch || currentAccountId() !== accountId) return
 
     if (!result.ok) {
       set({
@@ -146,3 +171,36 @@ export const useSearchStore = create<SearchState>()((set, get) => ({
     set({ history })
   }
 }))
+
+/**
+ * Drops the displayed results whenever a different account becomes active.
+ *
+ * Only the results (and any error) are cleared, not the term: the user asked for
+ * that search under the old account, and re-running it under the new one is one
+ * keypress away - whereas silently keeping the list is what made a switch look
+ * like it had not happened. The cached entries are left alone, since they are
+ * keyed by account and are correct again on switching back.
+ */
+export function initSearchSession(): () => void {
+  const off = window.api.on('accounts:changed', (snapshot) => {
+    const next = snapshot.activeId
+    if (useSearchStore.getState().accountId === next) return
+    useSearchStore.setState((state) => ({
+      accountId: next,
+      epoch: state.epoch + 1,
+      results: [],
+      query: '',
+      error: null,
+      loading: false
+    }))
+  })
+
+  // The first snapshot may already have arrived (init() fetches it before React
+  // mounts this view), so seed from what the app store knows.
+  const active = currentAccountId()
+  if (active !== '' && useSearchStore.getState().accountId !== active) {
+    useSearchStore.setState({ accountId: active })
+  }
+
+  return off
+}

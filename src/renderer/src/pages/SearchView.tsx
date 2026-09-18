@@ -8,6 +8,7 @@ import { AppRow } from '@renderer/components/AppRow'
 import { EmptyState } from '@renderer/components/EmptyState'
 import { ErrorNotice } from '@renderer/components/ErrorNotice'
 import { Icon, Spinner } from '@renderer/components/Icon'
+import { Select } from '@renderer/components/Select'
 import { VirtualList } from '@renderer/components/VirtualList'
 
 const ROW_HEIGHT = 56
@@ -58,21 +59,15 @@ export function SearchView(): ReactNode {
         <div className="ml-auto flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-[11.5px] dim">
             {t('search.limit')}
-            <select
-              className="select h-[26px]"
+            <Select
+              ariaLabel={t('search.limit')}
               value={limit}
-              onChange={(event) => {
-                const next = Number(event.target.value)
+              options={LIMITS.map((value) => ({ value, label: String(value) }))}
+              onChange={(next) => {
                 setLimit(next)
                 if (query) void run()
               }}
-            >
-              {LIMITS.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
+            />
           </label>
 
           <button

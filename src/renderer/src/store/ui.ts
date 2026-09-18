@@ -53,6 +53,9 @@ export interface UiState {
   authOpen: boolean
   setAuthOpen: (open: boolean) => void
 
+  /** Account manager (add / switch / rename / remove). */
+  accountsOpen: boolean
+  setAccountsOpen: (open: boolean) => void
 
 
   /** App whose version history drawer is open, if any. */
@@ -85,8 +88,8 @@ export const useUiStore = create<UiState>()((set, get) => ({
   authOpen: false,
   setAuthOpen: (authOpen) => set({ authOpen }),
 
-
-
+  accountsOpen: false,
+  setAccountsOpen: (accountsOpen) => set({ accountsOpen }),
   versionsFor: null,
   setVersionsFor: (versionsFor) => set({ versionsFor }),
 

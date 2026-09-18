@@ -59,6 +59,7 @@ import {
 } from '../shared/ipatool/parse'
 import { classifyError, shorten, type IpatoolErrorCode } from '../shared/ipatool/errors'
 import { secretValuesFromArgs } from '../shared/redact'
+import { accounts } from './accounts'
 import { engineManager } from './engine'
 import { settingsStore } from './settings'
 import { taskRegistry } from './tasks'
@@ -82,7 +83,17 @@ interface ExecuteOptions {
   kind: TaskKind
   label: string
   args: string[]
-  /** Extra values to scrub from logs (the global passphrase is added automatically). */
+  /**
+   * Account to run as. Omitted means the active one.
+   *
+   * The account decides the session directory, the sandboxed home and the
+   * keychain passphrase, and - on platforms where ipatool stores credentials in
+   * one machine-wide slot - it is what the slot is pointed at for the duration of
+   * this call. It is threaded through the queue as well, so a download started
+   * under account A never finishes under account B.
+   */
+  accountId?: string
+  /** Extra values to scrub from logs (the keychain passphrase is added automatically). */
   secrets?: string[]
   /** Keep ipatool interactive so it renders its progress bar. */
   interactive?: boolean
@@ -162,9 +173,8 @@ function normalizeApps(event: ZerologEvent | null): StoreApp[] {
 }
 
 /** Collects every secret that must never appear in a log line. */
-function secretList(extra: string[] = []): string[] {
-  const settings = settingsStore.getInternal()
-  const secrets = [settings.keychainPassphrase, ...extra].filter((s) => typeof s === 'string' && s.length > 0)
+function secretList(passphrase: string, extra: string[] = []): string[] {
+  const secrets = [passphrase, ...extra].filter((s) => typeof s === 'string' && s.length > 0)
   return Array.from(new Set(secrets))
 }
 
@@ -173,82 +183,92 @@ export class IpatoolApi {
   private async execute(options: ExecuteOptions): Promise<ExecuteResult> {
     const binary = await engineManager.ensure()
     const settings = settingsStore.getInternal()
-    const passphrase = await settingsStore.effectivePassphrase()
 
+    // Reserving the account is what pins this call to one session: it yields the
+    // environment (state directory + sandboxed home), the keychain passphrase,
+    // and - on a shared-slot platform - makes sure the slot describes this
+    // account before the process starts, holding it until we release.
+    const lease = await accounts.acquire(options.accountId)
+    try {
+      const args = withGlobals(options.args, {
+        format: 'json',
+        verbose: settings.verbose,
+        nonInteractive: !options.interactive,
+        keychainPassphrase: lease.passphrase || undefined
+      })
 
-    const args = withGlobals(options.args, {
-      format: 'json',
-      verbose: settings.verbose,
-      nonInteractive: !options.interactive,
-      keychainPassphrase: passphrase || undefined
-    })
+      const secrets = secretList(lease.passphrase, options.secrets ?? [])
+      const handle = taskRegistry.create(options.kind, options.label, args, secrets)
+      const taskId = handle.record.id
+      options.onTask?.(taskId)
 
-    const secrets = secretList(options.secrets ?? [])
-    const handle = taskRegistry.create(options.kind, options.label, args, secrets)
-    const taskId = handle.record.id
-    options.onTask?.(taskId)
+      const events: ZerologEvent[] = []
+      const textLines: string[] = []
 
-    const events: ZerologEvent[] = []
-    const textLines: string[] = []
+      taskRegistry.system(taskId, `exec: ${handle.record.command}`, 'debug')
+      taskRegistry.system(taskId, `account: ${lease.account.id} (${lease.account.email || 'not signed in'})`, 'debug')
+      taskRegistry.system(taskId, `session dir: ${lease.env.XDG_STATE_HOME ?? '(ipatool default)'}`, 'debug')
 
-    taskRegistry.system(taskId, `exec: ${handle.record.command}`, 'debug')
-    const stateDir = settings.stateDir.trim()
-    taskRegistry.system(taskId, `session dir: ${stateDir || '(ipatool default)'}`, 'debug')
-
-    const running = startProcess(binary, {
-      args,
-      cwd: options.cwd,
-      timeoutMs: options.timeoutMs,
-      secrets,
-      env: engineManager.childEnv(),
-      onLine: (line, stream, progress) => {
-        if (progress) {
-          // Progress renders are collapsed by the renderer's log store; keeping
-          // them out of `textLines` also stops them polluting error messages.
-          taskRegistry.log(taskId, { stream, level: 'progress', text: line })
-          return
+      const running = startProcess(binary, {
+        args,
+        cwd: options.cwd,
+        timeoutMs: options.timeoutMs,
+        secrets,
+        env: engineManager.childEnv(lease.env),
+        onLine: (line, stream, progress) => {
+          if (progress) {
+            // Progress renders are collapsed by the renderer's log store; keeping
+            // them out of `textLines` also stops them polluting error messages.
+            taskRegistry.log(taskId, { stream, level: 'progress', text: line })
+            return
+          }
+          const event = parseJsonLine(line)
+          if (event) {
+            events.push(event)
+            const level =
+              event.level === 'error'
+                ? 'error'
+                : event.level === 'warn'
+                  ? 'warn'
+                  : event.level === 'debug'
+                    ? 'debug'
+                    : 'info'
+            taskRegistry.log(taskId, { stream, level, text: line })
+          } else {
+            textLines.push(line)
+            taskRegistry.log(taskId, { stream, level: stream === 'stderr' ? 'warn' : 'info', text: line })
+          }
+        },
+        onChunk: (text, stream) => {
+          options.onChunk?.(text, stream)
+          // Progress renders and zerolog events share stdout; a JSON line must
+          // never reach the numeric progress parser.
+          if (options.onProgress && stream === 'stdout' && !isJsonLine(text.trimStart())) {
+            const sample = parseProgressChunk(text)
+            if (sample) options.onProgress(sample)
+          }
         }
-        const event = parseJsonLine(line)
-        if (event) {
-          events.push(event)
-          const level =
-            event.level === 'error'
-              ? 'error'
-              : event.level === 'warn'
-                ? 'warn'
-                : event.level === 'debug'
-                  ? 'debug'
-                  : 'info'
-          taskRegistry.log(taskId, { stream, level, text: line })
-        } else {
-          textLines.push(line)
-          taskRegistry.log(taskId, { stream, level: stream === 'stderr' ? 'warn' : 'info', text: line })
-        }
-      },
-      onChunk: (text, stream) => {
-        options.onChunk?.(text, stream)
-        // Progress renders and zerolog events share stdout; a JSON line must
-        // never reach the numeric progress parser.
-        if (options.onProgress && stream === 'stdout' && !isJsonLine(text.trimStart())) {
-          const sample = parseProgressChunk(text)
-          if (sample) options.onProgress(sample)
-        }
+      })
+
+      taskRegistry.registerCanceller(taskId, (hard) => running.kill(hard))
+
+      const run = await running.promise
+      const outcome = buildOutcome(events, textLines)
+
+      const state = run.killed ? 'canceled' : run.code === 0 && !outcome.errorEvent ? 'succeeded' : 'failed'
+      taskRegistry.finish(taskId, state, run.code)
+
+      if (run.timedOut) {
+        throw new ApiError('ipatool timed out', 'timeout', taskId, run.code, true)
       }
-    })
 
-    taskRegistry.registerCanceller(taskId, (hard) => running.kill(hard))
-
-    const run = await running.promise
-    const outcome = buildOutcome(events, textLines)
-
-    const state = run.killed ? 'canceled' : run.code === 0 && !outcome.errorEvent ? 'succeeded' : 'failed'
-    taskRegistry.finish(taskId, state, run.code)
-
-    if (run.timedOut) {
-      throw new ApiError('ipatool timed out', 'timeout', taskId, run.code, true)
+      return { outcome, run, taskId }
+    } finally {
+      // Always released, even on a throw: on a shared-slot platform the lock is
+      // what keeps another account's download from swapping the slot underneath
+      // this one, so a leaked release would deadlock the queue.
+      lease.release()
     }
-
-    return { outcome, run, taskId }
   }
 
   /**
@@ -289,8 +309,12 @@ export class IpatoolApi {
    * Logs in. Returns a discriminated result rather than throwing, because
    * "2FA required" is a normal, recoverable state that the UI must render as a
    * second input step.
+   *
+   * `accountId` decides *where* the session lands: ipatool has no
+   * `--profile`-style flag, so the account is selected purely by the environment
+   * this call runs under (see main/accounts.ts).
    */
-  async login(email: string, password: string, authCode?: string): Promise<LoginResult> {
+  async login(email: string, password: string, authCode?: string, accountId?: string): Promise<LoginResult> {
     const args = loginArgs(email, password, authCode)
     let result: ExecuteResult
     try {
@@ -298,6 +322,7 @@ export class IpatoolApi {
         kind: 'login',
         label: authCode ? 'Login (2FA)' : 'Login',
         args,
+        accountId,
         secrets: [password, authCode ?? ''],
         timeoutMs: 180_000
       })
@@ -358,11 +383,12 @@ export class IpatoolApi {
     return loginStatusFromCode(code)
   }
 
-  async accountInfo(): Promise<AccountInfo> {
+  async accountInfo(accountId?: string): Promise<AccountInfo> {
     const result = await this.execute({
       kind: 'account',
       label: 'Account info',
       args: accountInfoArgs(),
+      accountId,
       timeoutMs: 60_000
     })
     const success = this.assertSuccess(result, 'Could not read account info')
@@ -370,19 +396,20 @@ export class IpatoolApi {
   }
 
   /** Returns null instead of throwing when the user is simply not signed in. */
-  async accountInfoOrNull(): Promise<AccountInfo | null> {
+  async accountInfoOrNull(accountId?: string): Promise<AccountInfo | null> {
     try {
-      return await this.accountInfo()
+      return await this.accountInfo(accountId)
     } catch {
       return null
     }
   }
 
-  async revoke(): Promise<{ revoked: boolean }> {
+  async revoke(accountId?: string): Promise<{ revoked: boolean }> {
     const result = await this.execute({
       kind: 'revoke',
       label: 'Revoke credentials',
       args: revokeArgs(),
+      accountId,
       timeoutMs: 60_000
     })
     this.assertSuccess(result, 'Could not revoke credentials')
@@ -497,6 +524,8 @@ export class IpatoolApi {
       externalVersionID?: string
       platform?: Platform
       purchase?: boolean
+      /** Account the download belongs to; omitted means the active one. */
+      accountId?: string
     },
     onProgress: (sample: ProgressSample) => void,
     onTask?: (taskId: string) => void
@@ -506,6 +535,7 @@ export class IpatoolApi {
       label: 'Download',
       interactive: true,
       cwd: options.output || undefined,
+      accountId: options.accountId,
       args: downloadArgs({
         ...options.selector,
         output: options.output,

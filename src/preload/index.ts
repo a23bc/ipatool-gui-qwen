@@ -15,10 +15,11 @@ import {
   type EventPayloadMap,
   type FileFilter,
   type RendererApi,
-
+  type SessionCheck
 } from '../shared/ipc'
 import type {
   AccountInfo,
+  AccountsSnapshot,
   AppInfoPayload,
   DownloadRequest,
   EngineRelease,
@@ -53,7 +54,7 @@ import type { QueueAction, SearchRequest, PurchasesRequest, EnqueueOptions } fro
 const EVENT_CHANNELS: ReadonlySet<string> = new Set<EventChannel>([
   'engine:status',
   'engine:progress',
-  'account:changed',
+  'accounts:changed',
   'settings:changed',
   'task:created',
   'task:log',
@@ -100,11 +101,25 @@ const api: RendererApi = {
   uninstallEngine: (): Promise<EngineStatus> => ipcRenderer.invoke(IPC.EngineUninstall),
   checkAppUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(IPC.AppCheckUpdate),
 
-  login: (email: string, password: string, authCode?: string): Promise<LoginResult> =>
-    ipcRenderer.invoke(IPC.AuthLogin, email, password, authCode),
+  login: (email: string, password: string, authCode?: string, accountId?: string): Promise<LoginResult> =>
+    ipcRenderer.invoke(IPC.AuthLogin, email, password, authCode, accountId),
   getAccount: (): Promise<AccountInfo | null> => ipcRenderer.invoke(IPC.AuthAccount),
-  refreshAccount: (): Promise<AccountInfo | null> => ipcRenderer.invoke(IPC.AuthRefresh),
-  revoke: (): Promise<Operation<{ revoked: boolean }>> => ipcRenderer.invoke(IPC.AuthRevoke),
+  refreshAccount: (accountId?: string): Promise<AccountInfo | null> =>
+    ipcRenderer.invoke(IPC.AuthRefresh, accountId),
+  revoke: (accountId?: string): Promise<Operation<{ revoked: boolean }>> =>
+    ipcRenderer.invoke(IPC.AuthRevoke, accountId),
+
+  getAccounts: (): Promise<AccountsSnapshot> => ipcRenderer.invoke(IPC.AccountsGet),
+  addAccount: (remark?: string): Promise<AccountsSnapshot> => ipcRenderer.invoke(IPC.AccountsAdd, remark),
+  activateAccount: (id: string): Promise<{ snapshot: AccountsSnapshot; check: SessionCheck }> =>
+    ipcRenderer.invoke(IPC.AccountsActivate, id),
+  updateAccount: (id: string, patch: { remark?: string }): Promise<AccountsSnapshot> =>
+    ipcRenderer.invoke(IPC.AccountsUpdate, id, patch),
+  removeAccount: (id: string): Promise<{ snapshot: AccountsSnapshot; removedDir: boolean }> =>
+    ipcRenderer.invoke(IPC.AccountsRemove, id),
+  verifyAccount: (id: string): Promise<{ snapshot: AccountsSnapshot; check: SessionCheck }> =>
+    ipcRenderer.invoke(IPC.AccountsVerify, id),
+  refreshAccounts: (): Promise<AccountsSnapshot> => ipcRenderer.invoke(IPC.AccountsRefresh),
 
   search: (request: SearchRequest): Promise<Operation<SearchResult>> =>
     ipcRenderer.invoke(IPC.StoreSearch, request),

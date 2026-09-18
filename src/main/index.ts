@@ -11,12 +11,13 @@ import { rm } from 'node:fs/promises'
 import path from 'node:path'
 import { app, BrowserWindow, dialog, nativeTheme } from 'electron'
 import { mkdir } from 'node:fs/promises'
-import { applySettings, registerEventForwarding, registerIpc } from './ipc'
+import { applySettings, publishAccounts, registerEventForwarding, registerIpc } from './ipc'
 import { createMainWindow } from './window'
 import { settingsStore } from './settings'
+import { accounts } from './accounts'
 import { engineManager } from './engine'
 import { downloadQueue } from './queue'
-import { ipatoolApi } from './api'
+import { verifySession } from './session'
 import { taskRegistry } from './tasks'
 import type { Settings } from '../shared/types'
 
@@ -44,6 +45,13 @@ async function bootstrap(): Promise<void> {
   const settings = await settingsStore.load()
   nativeTheme.themeSource = settings.theme
   taskRegistry.setLineCap(settings.maxLogLines)
+
+  // Guarantees at least one account exists before anything can run as one, and -
+  // only when the home sandbox is disabled - reconciles a legacy ~/.ipatool so it
+  // cannot silently become every account's session.
+  await accounts.init().catch((error: unknown) => {
+    console.warn('[accounts] init failed:', error instanceof Error ? error.message : String(error))
+  })
 
   // Plan-v2 upgrade: stored passwords are gone by design. Remove any legacy
   // credential material from disk rather than leaving dead secrets behind.
@@ -135,10 +143,14 @@ async function postStartup(): Promise<void> {
     /* surfaced through the engine status event */
   }
 
-  // Only worth asking once the engine is actually usable.
+  // Only worth asking once the engine is actually usable. The probe confirms the
+  // active account's session, learns its identity (or adopts a session the
+  // terminal CLI created) and publishes the whole account list.
   if (engineManager.state.state === 'ready') {
-    const account = await ipatoolApi.accountInfoOrNull().catch(() => null)
-    mainWindow?.webContents.send('account:changed', account)
+    await verifySession(accounts.activeId)
+      .catch(() => undefined)
+      .then(() => publishAccounts())
+      .catch(() => undefined)
   }
 
   // Make sure the download folder exists so the first enqueue is not slower

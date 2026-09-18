@@ -11,6 +11,7 @@ import { QueueStateBadge } from '@renderer/components/Badges'
 import { EmptyState } from '@renderer/components/EmptyState'
 import { Icon } from '@renderer/components/Icon'
 import { ProgressBar } from '@renderer/components/ProgressBar'
+import { Select } from '@renderer/components/Select'
 import { VirtualList } from '@renderer/components/VirtualList'
 import type { Key } from '@renderer/i18n'
 
@@ -188,17 +189,12 @@ export function DownloadsView(): ReactNode {
         <div className="ml-auto flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-[11.5px] dim">
             {t('downloads.concurrency')}
-            <select
-              className="select h-[26px]"
+            <Select
+              ariaLabel={t('downloads.concurrency')}
               value={concurrency}
-              onChange={(event) => void setConcurrency(Number(event.target.value))}
-            >
-              {[1, 2, 3, 4, 6, 8].map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
+              options={[1, 2, 3, 4, 6, 8].map((value) => ({ value, label: String(value) }))}
+              onChange={(value) => void setConcurrency(value)}
+            />
           </label>
 
           <button type="button" className="btn btn-ghost h-[26px]" onClick={pauseAll} disabled={stats.running === 0}>

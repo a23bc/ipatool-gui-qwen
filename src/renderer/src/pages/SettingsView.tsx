@@ -7,6 +7,7 @@ import { useArtworkStore } from '@renderer/store/artwork'
 import { useUiStore } from '@renderer/store/ui'
 import { Icon, Spinner } from '@renderer/components/Icon'
 import { PlatformSelect } from '@renderer/components/Badges'
+import { Select } from '@renderer/components/Select'
 import { Choice, Field, NumberInput, Section, TextInput, Toggle } from '@renderer/components/SettingsControls'
 
 // Keyed by the exact source union so lookups stay total (no `| undefined`).
@@ -28,10 +29,12 @@ export function SettingsView(): ReactNode {
   const uninstall = useAppStore((state) => state.uninstallEngine)
   const appInfo = useAppStore((state) => state.appInfo)
   const account = useAppStore((state) => state.account)
+  const accounts = useAppStore((state) => state.accounts)
   const revokeAccount = useAppStore((state) => state.revokeAccount)
   const toast = useUiStore((state) => state.toast)
   const askConfirm = useUiStore((state) => state.askConfirm)
   const setAuthOpen = useUiStore((state) => state.setAuthOpen)
+  const setAccountsOpen = useUiStore((state) => state.setAccountsOpen)
 
   const [releases, setReleases] = useState<EngineRelease[]>([])
   const [releasesLoading, setReleasesLoading] = useState(false)
@@ -191,19 +194,20 @@ export function SettingsView(): ReactNode {
           />
 
           <Field label={t('settings.engine.version')} hint={releasesLoading ? t('settings.engine.releasesLoading') : undefined}>
-            <select
-              className="select w-[190px]"
+            <Select
+              className="w-[190px]"
+              menuMinWidth={190}
+              ariaLabel={t('settings.engine.version')}
               value={settings.engineVersion}
-              onChange={(event) => void update({ engineVersion: event.target.value })}
-            >
-              <option value="">{t('settings.engine.versionLatest')}</option>
-              {releases.map((release) => (
-                <option key={release.version} value={release.version}>
-                  {release.version}
-                  {release.prerelease ? ' (pre)' : ''}
-                </option>
-              ))}
-            </select>
+              onChange={(value) => void update({ engineVersion: value })}
+              options={[
+                { value: '', label: t('settings.engine.versionLatest') },
+                ...releases.map((release) => ({
+                  value: release.version,
+                  label: `${release.version}${release.prerelease ? ' (pre)' : ''}`
+                }))
+              ]}
+            />
           </Field>
 
           <Field label={t('settings.engine.mirror')} hint={t('settings.engine.mirrorHelp')} stacked>
@@ -265,17 +269,28 @@ export function SettingsView(): ReactNode {
           ) : null}
         </Section>
 
-        {/* ---------------- account ---------------- */}
+        {/* ---------------- accounts ---------------- */}
         <Section title={t('settings.section.account')}>
-          <Field label={t('auth.account.title')}>
-            <div className="flex items-center gap-2">
+          <Field label={t('accounts.title')} hint={t('settings.accounts.help')} stacked>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mono text-[11.5px] dim">
+                {account ? account.email : t('auth.signedOut')}
+                {accounts.accounts.length > 1
+                  ? ` · ${t('accounts.count', { n: accounts.accounts.length })}`
+                  : ''}
+              </span>
+              <button type="button" className="btn h-[28px]" onClick={() => setAccountsOpen(true)}>
+                <Icon name="user" size={13} />
+                {t('accounts.manage')}
+              </button>
               {account ? (
-                <>
-                  <span className="mono text-[11.5px] dim">{account.email}</span>
-                  <button type="button" className="btn btn-danger h-[28px]" onClick={() => void revokeAccount()}>
-                    {t('auth.signOut')}
-                  </button>
-                </>
+                <button
+                  type="button"
+                  className="btn btn-danger h-[28px]"
+                  onClick={() => void revokeAccount(accounts.activeId)}
+                >
+                  {t('auth.signOut')}
+                </button>
               ) : (
                 <button type="button" className="btn btn-primary h-[28px]" onClick={() => setAuthOpen(true)}>
                   <Icon name="user" size={13} />
@@ -309,31 +324,12 @@ export function SettingsView(): ReactNode {
             </Field>
           ) : null}
 
-          <Field label={t('settings.account.stateDir')} hint={t('settings.account.stateDirHelp')} stacked>
-            <div className="flex items-center gap-2">
-              <TextInput
-                value={settings.stateDir}
-                onChange={(value) => void update({ stateDir: value })}
-                placeholder="~/.local/state/ipatool-gui"
-                mono
-                className="flex-1"
-              />
-              <button
-                type="button"
-                className="btn h-[30px]"
-                onClick={() => {
-                  void window.api
-                    .pickDirectory(t('settings.account.stateDir'), settings.stateDir || undefined)
-                    .then((picked) => {
-                      if (picked) void update({ stateDir: picked })
-                    })
-                }}
-              >
-                <Icon name="folder" size={13} />
-                {t('common.browse')}
-              </button>
-            </div>
-          </Field>
+          <Toggle
+            checked={settings.isolateSessionHome}
+            onChange={(value) => void update({ isolateSessionHome: value })}
+            label={t('settings.account.isolateHome')}
+            hint={t('settings.account.isolateHomeHelp')}
+          />
 
           <Toggle
             checked={settings.verbose}

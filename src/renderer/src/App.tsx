@@ -2,9 +2,12 @@ import { useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { useAppStore } from '@renderer/store/app'
 import { useQueueStore } from '@renderer/store/queue'
+import { initPurchasesSession } from '@renderer/store/purchases'
+import { initSearchSession } from '@renderer/store/search'
 import { useTasksStore } from '@renderer/store/tasks'
 import { useUiStore, VIEWS, type View } from '@renderer/store/ui'
 import { CommandPalette } from '@renderer/components/CommandPalette'
+import { AccountManager } from '@renderer/components/AccountManager'
 import { ConfirmDialog } from '@renderer/components/ConfirmDialog'
 import { EngineSetup } from '@renderer/components/EngineSetup'
 import { Header, StatusBar } from '@renderer/components/Header'
@@ -66,6 +69,17 @@ export function App(): ReactNode {
     })()
   }, [initApp, initQueue, initTasks])
 
+  // Bind the stores that hold per-account data to the active account. Search
+  // results and the owned-apps list both belong to exactly one Apple ID, so a
+  // switch has to drop them; subscribing here (rather than in each view) means the
+  // reset also happens while another view is on screen.
+  useEffect(() => {
+    const disposers = [initSearchSession(), initPurchasesSession()]
+    return () => {
+      for (const dispose of disposers) dispose()
+    }
+  }, [])
+
   // Global shortcuts: Ctrl/Cmd+1..5 switch views, Ctrl/Cmd+, opens settings.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -120,6 +134,7 @@ export function App(): ReactNode {
       {/* Overlays. Order matters for stacking: drawer under palette. */}
       {versionsFor ? <VersionsDrawer /> : null}
       <EngineSetup />
+      <AccountManager />
       <AuthModal />
       <CommandPalette />
       <ConfirmDialog />

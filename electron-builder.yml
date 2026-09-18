@@ -45,6 +45,10 @@ win:
   #   CSC_KEY_PASSWORD           = certificate password
   # electron-builder picks these up automatically (signtool / Azure Trusted
   # Signing), which removes the SmartScreen / Defender-PUA friction.
+  # NOTE: because `arch` is pinned here, `--x64`/`--arm64` are ignored for these
+  # targets (see the linux block below for the full explanation). Only x64 is
+  # shipped, which matches CI - drop the `arch` lines if a second Windows
+  # architecture is ever added, or the flag will silently do nothing.
   target:
     - target: nsis
       arch: [x64]
@@ -86,11 +90,19 @@ linux:
   synopsis: Desktop front-end for ipatool
   maintainer: ipatool-gui contributors <noreply@example.com>
   artifactName: ${name}-${version}-linux-${arch}.${ext}
+  # ⚠️ Deliberately NO `arch:` here. Once a target declares its own arch list,
+  # electron-builder stops consulting the CLI: computeArchToTargetNamesMap()
+  # only uses --x64/--arm64 for target names it has to invent, and otherwise
+  # expands whatever arch list it finds in this file - so `--linux --x64` built
+  # BOTH architectures in every job and the x64 artifact contained the arm64
+  # package. Leaving the arch to the CLI (which defaults to the host arch) is
+  # what makes one job mean one architecture:
+  #   --linux --x64          -> x64 only
+  #   --linux --arm64        -> arm64 only
+  #   --linux --x64 --arm64  -> both (what `npm run dist:linux` asks for)
   target:
-    - target: AppImage
-      arch: [x64, arm64]
-    - target: deb
-      arch: [x64, arm64]
+    - AppImage
+    - deb
   desktop:
     entry:
       Name: IPATool GUI

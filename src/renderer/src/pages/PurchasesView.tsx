@@ -128,7 +128,7 @@ export function PurchasesView(): ReactNode {
           <PlatformSelect
             value={platform}
             onChange={(next) => setPlatform(next)}
-            className="h-[26px] max-w-[160px]"
+            className="max-w-[160px]"
           />
 
           <button
