@@ -52,6 +52,7 @@ export const en = {
   'common.next': 'Next',
   'common.done': 'Done',
 
+  'platform.label': 'Platform',
   'platform.auto': 'Auto (iPhone + iPad)',
   'platform.iphone': 'iPhone (iOS)',
   'platform.ipad': 'iPad (iPadOS)',

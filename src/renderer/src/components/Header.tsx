@@ -161,7 +161,7 @@ export const Header = memo(function Header(): ReactNode {
           setPlatform(next)
           if (term.trim() !== '') void run()
         }}
-        className="no-drag h-[28px] max-w-[170px]"
+        className="no-drag max-w-[170px]"
       />
 
       <span className="mx-0.5 h-4 w-px shrink-0" style={{ background: 'var(--border)' }} />

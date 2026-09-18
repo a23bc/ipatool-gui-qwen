@@ -153,6 +153,23 @@ downloading  21% [======>       ] (12/45 MB, 1.2 MB/s)
 - **IPC 与日志上界**：每任务日志环形缓冲（默认 2000 行）、任务数上限 200、图标 LRU 缓存；
 - 首屏不等网络：窗口 `ready-to-show` 后才做引擎探测与账户刷新。
 
+### 为什么所有下拉框都是自绘的（以及一个 CSS 分层的坑）
+
+原生 `<select>` 的**弹出列表由操作系统绘制**（Windows 的灰色系统菜单、系统字体、系统高亮），
+CSS 管不到它——而本应用其他菜单（账户下拉、命令面板）都是自绘面板，两者并排就显得不是一个程序。
+`components/Select.tsx` 因此替掉了全部 4 处原生 select：触发器沿用 `.input` 的盒子，
+弹出层用 `.panel`，行高亮/选中态与账户菜单一致。
+
+两个实现要点：弹出层**挂到 `<body>` 并用 `position: fixed`**（这些控件位于 `overflow: hidden`
+的卡片与工具栏里，绝对定位会被裁掉），定位与键盘索引逻辑抽到 `lib/select.ts`
+（纯函数，有单测）；焦点始终留在触发器上，活动行通过 `aria-activedescendant` 汇报。
+
+⚠️ 顺带记录一个容易踩的坑：`index.css` 里的自定义类是**未分层（unlayered）**的，而 Tailwind 4
+的工具类在 `@layer utilities` 里——按 CSS 层叠规则，**未分层样式优先于任何 `@layer` 内的样式**，
+与选择器权重无关。所以 `<select class="select h-[26px]">` 这种写法里的 `h-[26px]`
+**从来没有生效过**（`.select{height:30px}` 赢），全应用工具栏的控件实际都是 30px。
+新控件把尺寸写进类本身（`.select-trigger`），调用点只负责宽度约束，不再依赖被静默忽略的工具类。
+
 ### 安全模型
 
 - 渲染进程 `sandbox: true` + `contextIsolation: true` + 严格 CSP；生产构建关闭 DevTools；
@@ -204,17 +221,22 @@ downloading  21% [======>       ] (12/45 MB, 1.2 MB/s)
 > | 动作 | 结果 |
 > | --- | --- |
 > | 推送分支 | 仅 `ci.yml` 验证，无产物 |
-> | 推送 `v*` 标签 | 4 个矩阵（win-x64 / mac-x64 / mac-arm64 / linux-x64）各自构建，**每个平台+架构一个独立 artifact**；不创建 Release |
+> | 推送 `v*` 标签 | 5 个矩阵（win-x64 / mac-x64 / mac-arm64 / linux-x64 / linux-arm64）各自构建，**每个平台+架构一个独立 artifact**；不创建 Release |
 > | Actions → Release → Run workflow | 同上；勾选 `publish` 才会额外创建 **Draft** Release |
 >
 > artifact 按「平台+架构」拆分上传：只想要 Linux x64 时不必把 arm64 或别的平台一起下载。
+> Linux 的两个架构必须是两个矩阵项：`--linux --x64` 单独用**不足以**限定架构，
+> electron-builder 只会用 `--x64/--arm64` 去补它自己发明的 target 名，而
+> `electron-builder.yml` 里 AppImage/deb 各自声明了 `[x64, arm64]`，于是每个 job 都会
+> 把两个架构都构建一遍（这正是 x64 artifact 里混进 arm64 包的原因）。所以 release.yml
+> 显式写成 `AppImage:x64 deb:x64` / `AppImage:arm64 deb:arm64`，让 CLI 的列表成为准绳。
 > 注意：**GitHub 的 artifact 下载永远是 zip 容器**（平台行为，无法更改）。要拿原始文件
 > （安装包/运行包本身），请用同一次运行自动创建的 **Draft Release** 的资产区——Draft 不公开，
 > 只有仓库协作者可见，手动点 Publish 才会对外。
 > macOS 在 CI 上产 **`.app.tar.gz` 运行包**（GitHub 的 macOS runner 无法运行 dmg 所需的
 > `hdiutil attach`，会报 `Device not configured`，故用 `dir` target + tar）；
 > 在真实 Mac 上 `npm run dist:mac` 仍会产 dmg 安装包。
-> 各平台产物：Windows = NSIS 安装包 + portable 运行包；Linux = deb 安装包 + AppImage 运行包。
+> 各平台产物：Windows = NSIS 安装包 + portable 运行包（x64）；Linux = deb 安装包 + AppImage 运行包（x64 与 arm64 分开打包）。
 >
 > Draft 不是公开状态，仍需到 Releases 页手动点 Publish 才对外可见。
 > 地下开发阶段只要不勾 `publish`，仓库对外不会留下任何 Release 痕迹。
@@ -241,7 +263,7 @@ npm run dev          # esbuild 监听主进程 + Vite HMR + 自动拉起 Electro
 npm run dist         # 当前平台
 npm run dist:win     # Windows NSIS + portable
 npm run dist:mac     # macOS dmg/zip（未签名）
-npm run dist:linux   # AppImage + deb
+npm run dist:linux   # AppImage + deb（本机同时产 x64 与 arm64；CI 按架构拆成两个 job）
 ```
 
 产物在 `release/`。Linux 打包需要 `fakeroot`、`dpkg`、`rpm`、`libarchive-tools`
@@ -303,7 +325,8 @@ src/
   renderer/          React 19 + Vite + Tailwind 4
     src/store/           zustand 状态（快照合并、进度旁路）
     src/lib/progressBus  进度直写 DOM 的总线
-    src/components|pages i18n(zh-CN/en-US)、账户切换器与账户管理面板
+    src/lib/select.ts    自绘下拉框的定位/键盘纯逻辑（有单测）
+    src/components|pages i18n(zh-CN/en-US)、账户切换器与账户管理面板、自绘 Select
 .github/workflows/   ci.yml（验证）+ release.yml（三平台打包发布）
 tests/               vitest 单测 + 真实 tar 固件
 ```

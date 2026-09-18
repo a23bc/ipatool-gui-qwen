@@ -41,6 +41,7 @@ jobs:
             platform: win
             arch: x64
             flag: '--x64'
+            targets: ''
             extra: ''
             label: 'Windows x64'
           # CI builds the unpacked .app (dir target) and tars it into a runnable
@@ -51,20 +52,40 @@ jobs:
             platform: mac
             arch: x64
             flag: '--x64'
+            targets: ''
             extra: '-c.mac.target=dir'
             label: 'macOS x64'
           - os: macos-14
             platform: mac
             arch: arm64
             flag: '--arm64'
+            targets: ''
             extra: '-c.mac.target=dir'
             label: 'macOS arm64'
+          # Linux needs the targets spelled out with an explicit `:arch`.
+          #
+          # `--linux --x64` does NOT restrict the architecture here, because the
+          # CLI only consults --x64/--arm64 for target *names it has to invent*.
+          # With no names given, electron-builder falls back to the arch list
+          # declared in electron-builder.yml (AppImage/deb each list x64 AND
+          # arm64) and builds all of it - so both jobs produced both packages and
+          # the x64 artifact shipped the arm64 one. Naming every target with its
+          # arch makes the CLI list authoritative instead
+          # (computeArchToTargetNamesMap() returns it untouched).
           - os: ubuntu-22.04
             platform: linux
             arch: x64
             flag: '--x64'
+            targets: 'AppImage:x64 deb:x64'
             extra: ''
             label: 'Linux x64'
+          - os: ubuntu-22.04
+            platform: linux
+            arch: arm64
+            flag: '--arm64'
+            targets: 'AppImage:arm64 deb:arm64'
+            extra: ''
+            label: 'Linux arm64'
     runs-on: ${{ matrix.os }}
     # Windows runners default to PowerShell, which breaks the Unix tooling used
     # below (ls, line continuations). bash ships on all three runner images.
@@ -117,7 +138,7 @@ jobs:
           '
 
       - name: Build installers
-        run: npx electron-builder --${{ matrix.platform }} ${{ matrix.flag }} ${{ matrix.extra }} --publish never
+        run: npx electron-builder --${{ matrix.platform }} ${{ matrix.flag }} ${{ matrix.targets }} ${{ matrix.extra }} --publish never
         env:
           # Builds are unsigned by design; make that explicit so a missing
           # certificate never silently changes the output.
@@ -204,7 +225,7 @@ jobs:
           gh release create "$TAG" \
             --title "IPATool GUI ${TAG}" \
             --draft \
-            --notes "Windows: NSIS installer + portable exe. Linux: deb + AppImage. macOS: runnable .app.tar.gz (build the dmg installer locally with npm run dist:mac).
+            --notes "Windows: NSIS installer + portable exe (x64). Linux: deb + AppImage, built separately for x64 and arm64. macOS: runnable .app.tar.gz for x64 and arm64 (build the dmg installer locally with npm run dist:mac).
 
           Builds are **unsigned**: on macOS right-click → Open the first time; on Windows accept the SmartScreen prompt.
 

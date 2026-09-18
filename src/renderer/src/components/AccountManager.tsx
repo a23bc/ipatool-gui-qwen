@@ -214,8 +214,8 @@ export function AccountManager(): ReactNode {
 
   const onAdd = (): void =>
     void run(async () => {
-      const created = await addAccount('')
-      if (!created) return
+      const id = await addAccount('')
+      if (!id) return
       setOpen(false)
       setAuthOpen(true)
     })

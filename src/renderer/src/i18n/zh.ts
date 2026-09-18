@@ -51,6 +51,7 @@ export const zh: Dict = {
   'common.next': '下一步',
   'common.done': '完成',
 
+  'platform.label': '平台',
   'platform.auto': '自动（iPhone + iPad）',
   'platform.iphone': 'iPhone（iOS）',
   'platform.ipad': 'iPad（iPadOS）',

@@ -156,11 +156,7 @@ export function VersionsDrawer(): ReactNode {
           className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2.5"
           style={{ borderColor: 'var(--border)' }}
         >
-          <PlatformSelect
-            value={platform}
-            onChange={(next) => void load(app, next)}
-            className="h-[26px]"
-          />
+          <PlatformSelect value={platform} onChange={(next) => void load(app, next)} />
           <button
             type="button"
             className="btn h-[26px]"

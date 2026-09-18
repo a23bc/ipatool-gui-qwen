@@ -7,6 +7,7 @@ import { useArtworkStore } from '@renderer/store/artwork'
 import { useUiStore } from '@renderer/store/ui'
 import { Icon, Spinner } from '@renderer/components/Icon'
 import { PlatformSelect } from '@renderer/components/Badges'
+import { Select } from '@renderer/components/Select'
 import { Choice, Field, NumberInput, Section, TextInput, Toggle } from '@renderer/components/SettingsControls'
 
 // Keyed by the exact source union so lookups stay total (no `| undefined`).
@@ -193,19 +194,20 @@ export function SettingsView(): ReactNode {
           />
 
           <Field label={t('settings.engine.version')} hint={releasesLoading ? t('settings.engine.releasesLoading') : undefined}>
-            <select
-              className="select w-[190px]"
+            <Select
+              className="w-[190px]"
+              menuMinWidth={190}
+              ariaLabel={t('settings.engine.version')}
               value={settings.engineVersion}
-              onChange={(event) => void update({ engineVersion: event.target.value })}
-            >
-              <option value="">{t('settings.engine.versionLatest')}</option>
-              {releases.map((release) => (
-                <option key={release.version} value={release.version}>
-                  {release.version}
-                  {release.prerelease ? ' (pre)' : ''}
-                </option>
-              ))}
-            </select>
+              onChange={(value) => void update({ engineVersion: value })}
+              options={[
+                { value: '', label: t('settings.engine.versionLatest') },
+                ...releases.map((release) => ({
+                  value: release.version,
+                  label: `${release.version}${release.prerelease ? ' (pre)' : ''}`
+                }))
+              ]}
+            />
           </Field>
 
           <Field label={t('settings.engine.mirror')} hint={t('settings.engine.mirrorHelp')} stacked>

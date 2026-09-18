@@ -10,7 +10,6 @@ import { create } from 'zustand'
 import type {
   AccountInfo,
   AccountsSnapshot,
-  AccountView,
   AppInfoPayload,
   EngineStatus,
   Settings,
@@ -64,7 +63,7 @@ export interface AppState {
   setAccount: (account: AccountInfo | null) => void
 
   getAccounts: () => Promise<AccountsSnapshot>
-  addAccount: (remark?: string) => Promise<AccountView | null>
+  addAccount: (remark?: string) => Promise<string | null>
   activateAccount: (id: string) => Promise<AccountSwitchResult>
   updateAccount: (id: string, remark: string) => Promise<void>
   removeAccount: (id: string) => Promise<boolean>
@@ -306,12 +305,20 @@ export const useAppStore = create<AppState>()((set, get) => ({
     return accounts
   },
 
-  /** Creates an empty account and makes it active; returns it for the sign-in flow. */
+  /**
+   * Creates an empty account and makes it active; returns its id for the
+   * sign-in flow, or null when creating it failed.
+   *
+   * The id - not the account view - because a never-used slot is deliberately
+   * filtered out of the snapshot (see AccountRegistry.isUnused). Looking the new
+   * account up in `snapshot.accounts` would therefore come back empty, and the
+   * caller would skip the sign-in that the account was created for.
+   */
   async addAccount(remark) {
     try {
       const accounts = await window.api.addAccount(remark)
       set({ accounts, account: activeIdentity(accounts) })
-      return accounts.accounts.find((entry) => entry.id === accounts.activeId) ?? null
+      return accounts.activeId || null
     } catch (error) {
       useUiStore.getState().toast({ kind: 'error', message: String(error) })
       return null

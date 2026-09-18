@@ -86,6 +86,11 @@ linux:
   synopsis: Desktop front-end for ipatool
   maintainer: ipatool-gui contributors <noreply@example.com>
   artifactName: ${name}-${version}-linux-${arch}.${ext}
+  # Both architectures are listed so a local `npm run dist:linux` produces the
+  # full set. CI must NOT rely on `--x64` / `--arm64` to narrow this down: the
+  # CLI only uses those flags for target names it invents itself, so it would
+  # expand this list and build both arches in every job. release.yml therefore
+  # passes explicit `AppImage:<arch> deb:<arch>` targets.
   target:
     - target: AppImage
       arch: [x64, arm64]

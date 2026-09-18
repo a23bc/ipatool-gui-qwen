@@ -105,8 +105,11 @@ export const AccountSwitcher = memo(function AccountSwitcher(): ReactNode {
     setOpen(false)
     setBusy(true)
     try {
-      const created = await addAccount('')
-      if (created) setAuthOpen(true)
+      const id = await addAccount('')
+      // The slot exists from here on, but it is empty and is kept out of the
+      // list, so the sign-in dialog is the only place the new account can become
+      // usable. Opening it here makes "add account" one action instead of two.
+      if (id) setAuthOpen(true)
     } finally {
       setBusy(false)
     }

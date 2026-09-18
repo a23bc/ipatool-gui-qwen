@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { Platform, QueueState, TaskState } from '@shared/types'
 import { useAppStore } from '@renderer/store/app'
 import { Icon, type IconName } from './Icon'
+import { Select } from './Select'
 
 /** Renders the platform tokens ipatool reports for an app. */
 export function PlatformBadges({ platforms }: { platforms?: string[] }): ReactNode {
@@ -38,18 +39,14 @@ export interface PlatformSelectProps {
 export function PlatformSelect({ value, onChange, className = '', id }: PlatformSelectProps): ReactNode {
   const t = useAppStore((state) => state.t)
   return (
-    <select
+    <Select
       id={id}
-      className={`select no-drag ${className}`}
+      className={className}
       value={value}
-      onChange={(event) => onChange(event.target.value as Platform)}
-    >
-      {PLATFORM_OPTIONS.map((option) => (
-        <option key={option.value || 'auto'} value={option.value}>
-          {t(option.labelKey)}
-        </option>
-      ))}
-    </select>
+      onChange={onChange}
+      ariaLabel={t('platform.label')}
+      options={PLATFORM_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+    />
   )
 }
 
