@@ -41,7 +41,6 @@ jobs:
             platform: win
             arch: x64
             flag: '--x64'
-            targets: ''
             extra: ''
             label: 'Windows x64'
           # CI builds the unpacked .app (dir target) and tars it into a runnable
@@ -52,38 +51,35 @@ jobs:
             platform: mac
             arch: x64
             flag: '--x64'
-            targets: ''
             extra: '-c.mac.target=dir'
             label: 'macOS x64'
           - os: macos-14
             platform: mac
             arch: arm64
             flag: '--arm64'
-            targets: ''
             extra: '-c.mac.target=dir'
             label: 'macOS arm64'
-          # Linux needs the targets spelled out with an explicit `:arch`.
+          # Linux ships two architectures as two jobs. The arch MUST come from
+          # `--x64` / `--arm64`: a target name cannot carry it (`--linux
+          # AppImage:x64` is rejected as an unknown argument - the array option
+          # stops at the next `--flag`, so the tokens never reach it).
           #
-          # `--linux --x64` does NOT restrict the architecture here, because the
-          # CLI only consults --x64/--arm64 for target *names it has to invent*.
-          # With no names given, electron-builder falls back to the arch list
-          # declared in electron-builder.yml (AppImage/deb each list x64 AND
-          # arm64) and builds all of it - so both jobs produced both packages and
-          # the x64 artifact shipped the arm64 one. Naming every target with its
-          # arch makes the CLI list authoritative instead
-          # (computeArchToTargetNamesMap() returns it untouched).
+          # For that flag to mean anything, electron-builder.yml's linux.target
+          # lists no arch - while it did, `--x64` was silently ignored and every
+          # job built both (computeArchToTargetNamesMap() only consults the CLI
+          # for target names it invents itself, and otherwise expands the arch
+          # list from the config), which is how the arm64 package ended up
+          # inside the x64 artifact.
           - os: ubuntu-22.04
             platform: linux
             arch: x64
             flag: '--x64'
-            targets: 'AppImage:x64 deb:x64'
             extra: ''
             label: 'Linux x64'
           - os: ubuntu-22.04
             platform: linux
             arch: arm64
             flag: '--arm64'
-            targets: 'AppImage:arm64 deb:arm64'
             extra: ''
             label: 'Linux arm64'
     runs-on: ${{ matrix.os }}
@@ -138,7 +134,7 @@ jobs:
           '
 
       - name: Build installers
-        run: npx electron-builder --${{ matrix.platform }} ${{ matrix.flag }} ${{ matrix.targets }} ${{ matrix.extra }} --publish never
+        run: npx electron-builder --${{ matrix.platform }} ${{ matrix.flag }} ${{ matrix.extra }} --publish never
         env:
           # Builds are unsigned by design; make that explicit so a missing
           # certificate never silently changes the output.

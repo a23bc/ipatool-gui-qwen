@@ -225,11 +225,21 @@ CSS 管不到它——而本应用其他菜单（账户下拉、命令面板）�
 > | Actions → Release → Run workflow | 同上；勾选 `publish` 才会额外创建 **Draft** Release |
 >
 > artifact 按「平台+架构」拆分上传：只想要 Linux x64 时不必把 arm64 或别的平台一起下载。
-> Linux 的两个架构必须是两个矩阵项：`--linux --x64` 单独用**不足以**限定架构，
-> electron-builder 只会用 `--x64/--arm64` 去补它自己发明的 target 名，而
-> `electron-builder.yml` 里 AppImage/deb 各自声明了 `[x64, arm64]`，于是每个 job 都会
-> 把两个架构都构建一遍（这正是 x64 artifact 里混进 arm64 包的原因）。所以 release.yml
-> 显式写成 `AppImage:x64 deb:x64` / `AppImage:arm64 deb:arm64`，让 CLI 的列表成为准绳。
+>
+> ⚠️ **Linux 的架构只能由 `--x64` / `--arm64` 决定，不能写在 target 名里。**
+> 两个坑都踩过了，记在这里以免再犯：
+> 1. `--linux AppImage:x64 deb:x64` 会被 CLI 当成**未知参数**（`Unknown arguments: …`）报错退出。
+>    `--linux` 是数组型选项，它在遇到下一个 `--flag` 时就结束取值，于是这两个 token 落成了
+>    位置参数。target 名里的 `:arch` 后缀本身是被支持的，但**必须紧跟平台标志**：
+>    `--linux AppImage:x64 deb:x64 --x64`。
+> 2. 更隐蔽的是：**只要 `electron-builder.yml` 的 `linux.target` 里写了 `arch: [x64, arm64]`，
+>    `--x64` 就会被静默忽略**。`computeArchToTargetNamesMap()` 只在「target 名要由它自己发明」
+>    时才读 CLI 的架构标志，否则就展开配置里的架构列表 —— 于是每个 job 都构建两个架构，
+>    x64 artifact 里混进了 arm64 包。
+>
+> 所以现在 `electron-builder.yml` 的 `linux.target` **不写 arch**，架构统一由 CLI 决定：
+> `--linux --x64` → 只有 x64，`--linux --arm64` → 只有 arm64，
+> 本机要一次出两个架构就 `npm run dist:linux`（脚本里显式传了 `--x64 --arm64`）。
 > 注意：**GitHub 的 artifact 下载永远是 zip 容器**（平台行为，无法更改）。要拿原始文件
 > （安装包/运行包本身），请用同一次运行自动创建的 **Draft Release** 的资产区——Draft 不公开，
 > 只有仓库协作者可见，手动点 Publish 才会对外。
